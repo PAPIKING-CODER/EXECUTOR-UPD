@@ -185,7 +185,7 @@ def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> disco
     e.set_thumbnail(url=URL_CHECK)
     e.add_field(
         name=f"{E_RDIAM} ─ RESULT",
-        value=f"```\n{result[:900]}\n```",
+        value=f"`\n{result[:900]}\n`",
         inline=False
     )
     e.add_field(
@@ -199,7 +199,7 @@ def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> disco
         inline=False
     )
     e.set_image(url=IMG_MAIN)
-    e.set_footer(text=f"SYSTEM MADE WITH 🔥  |  {_footer()}")
+    e.set_footer(text=f"MADE WITH 💪 |  {_footer()}")
     return e
 
 def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> discord.Embed:
@@ -222,7 +222,7 @@ def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> disc
         inline=False
     )
     e.set_image(url=IMG_MAIN)
-    e.set_footer(text=f"SYSTEM MADE WITH 🔥  |  {_footer()}")
+    e.set_footer(text=f"MADE WITH💪  |  {_footer()}")
     return e
 
 def embed_loading() -> discord.Embed:
