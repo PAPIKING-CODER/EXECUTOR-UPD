@@ -1,5 +1,5 @@
 """
-KING BOT — Bypass + Fun Commands
+FMD BOT — Bypass + Fun Commands
 """
 import sys, types
 
@@ -25,7 +25,7 @@ except ImportError:
     pass
 
 # ── LOGGING ──────────────────────────────────────────────────────
-logger = logging.getLogger("KING")
+logger = logging.getLogger("FMD")
 logger.setLevel(logging.INFO)
 for _h in (RotatingFileHandler("bot.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"),
            logging.StreamHandler()):
@@ -40,7 +40,7 @@ BOT_INVITE_URL     = os.environ.get("BOT_INVITE_URL",
     "https://discord.com/oauth2/authorize?client_id=1525040833814855710")
 
 BOT_NAME   = "FMD BOT"
-BOT_CREDIT = "BY KING"
+BOT_CREDIT = "Made with 💪"
 
 BYPASS_API_URL = "https://4pi-bypass.vercel.app/api/bypass?url="
 BYPASS_TIMEOUT = 30
@@ -60,25 +60,21 @@ C_WARN  = 0xFF4500   # rojo-naranja para loading
 C_INFO  = 0x8B0000   # rojo profundo
 
 # ── IMAGEN PRINCIPAL ─────────────────────────────────────────────
-IMG_MAIN = "https://cdn.discordapp.com/attachments/1525556800579965058/1525566942281465876/ezgif-35ed139046075f14_1.gif?ex=6a54832e&is=6a5331ae&hm=a4db669a357a86146d47dabf764d2f5c33d1e764a23744408a074c58c4576633&"
+IMG_MAIN = "https://cdn.discordapp.com/attachments/1525427252400099381/1525750876155805847/ezgif-37d313baab956afc.gif?ex=6a5485bb&is=6a53343b&hm=f6df69c459c7bad9ed031d12eee35f42ab4adbb7290fe08a3707046eb3bf7200&"
 
 # ── EMOJIS ───────────────────────────────────────────────────────
-# Se usan emojis unicode estándar (en vez de emojis personalizados) para que
-# siempre se vean bien, sin importar si el bot tiene el permiso "Usar emojis
-# externos" en el servidor. Antes, cuando el permiso faltaba, Discord mostraba
-# el texto crudo del emoji (por eso aparecía ":_:").
-E_CHECK   = "✅"   # check mark
-E_REDPT   = "🔴"   # red point
-E_WARN    = "⚠️"   # warning
-E_RDIAM   = "💎"   # red diamond
-E_ARROW   = "➡️"   # arrow
-E_CROWN   = "👑"   # red crown
-E_NO      = "❌"   # no
-E_LOAD    = "⏳"   # load
-E_USER    = "👤"   # persona
-E_TICKET  = "🎫"   # ticket
-E_LOCK    = "🔒"   # lock
-E_INFO    = "📌"   # info
+E_CHECK   = "✅"
+E_REDPT   = "🔴"
+E_WARN    = "⚠️"
+E_RDIAM   = "💎"
+E_ARROW   = "➡️"
+E_CROWN   = "👑"
+E_NO      = "❌"
+E_LOAD    = "⏳"
+E_USER    = "👤"
+E_TICKET  = "🎫"
+E_LOCK    = "🔒"
+E_INFO    = "📌"
 
 # URLs de las imágenes para set_thumbnail / set_author
 URL_CHECK  = "https://cdn.discordapp.com/emojis/1511381303872716820.webp?size=100&animated=true"
@@ -111,11 +107,9 @@ def save_json(path, data):
 autobypass_channels: set = set(load_json(AUTOBYPASS_FILE, []))
 def _save_ab(): save_json(AUTOBYPASS_FILE, list(autobypass_channels))
 
-# ticket_config: { "<guild_id>": {"category": id, "support_role": id, "log_channel": id} }
 ticket_config: dict = load_json(TICKET_CONFIG_FILE, {})
 def _save_tc(): save_json(TICKET_CONFIG_FILE, ticket_config)
 
-# ticket_counter: { "<guild_id>": int }
 ticket_counter: dict = load_json(TICKET_COUNTER_FILE, {})
 def _save_tcounter(): save_json(TICKET_COUNTER_FILE, ticket_counter)
 
@@ -139,7 +133,7 @@ def _uptime() -> str:
     return f"{h}h {m}m {s}s"
 
 def _footer() -> str:
-    return f"{BOT_NAME} • {BOT_CREDIT}"
+    return "Made with 💪"
 
 # ── BYPASS ENGINE ────────────────────────────────────────────────
 _KEYS = ("content","result","loadstring","bypassed","bypassed_link",
@@ -203,7 +197,7 @@ def _bypass_sync(url: str):
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
     return None, last_err
 
-# ── BYPASS EMBEDS  (diseño foto 2, tema rojo) ─────────────────────
+# ── BYPASS EMBEDS ────────────────────────────────────────────────
 
 def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> discord.Embed:
     e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
@@ -211,7 +205,7 @@ def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> disco
     e.set_thumbnail(url=URL_CHECK)
     e.add_field(
         name=f"{E_RDIAM} RESULT",
-        value=f"`\n{result[:900]}\n`",
+        value=f"```\n{result[:900]}\n```",
         inline=False
     )
     e.add_field(
@@ -225,7 +219,7 @@ def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> disco
         inline=True
     )
     e.set_image(url=IMG_MAIN)
-    e.set_footer(text=f"MADE WITH 💪  |  {_footer()}")
+    e.set_footer(text=_footer())
     return e
 
 def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> discord.Embed:
@@ -234,7 +228,7 @@ def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> disc
     e.set_thumbnail(url=URL_NO)
     e.add_field(
         name=f"{E_RDIAM} URL",
-        value=f"`\n{url[:200]}\n`",
+        value=f"```\n{url[:200]}\n```",
         inline=False
     )
     e.add_field(
@@ -253,7 +247,7 @@ def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> disc
         inline=True
     )
     e.set_image(url=IMG_MAIN)
-    e.set_footer(text=f"MADE WITH 💪  |  {_footer()}")
+    e.set_footer(text=_footer())
     return e
 
 def embed_loading() -> discord.Embed:
@@ -276,18 +270,18 @@ class BypassView(View):
             disabled=True, row=0))
         self.add_item(Button(
             label="SUPPORT SERVER", emoji="💬",
-            url=https://discord.gg/ZMXmwUjTBf
+            url=SUPPORT_SERVER_URL,
             style=discord.ButtonStyle.link, row=0))
         self.add_item(Button(
             label="INVITE ME", emoji="🤖",
-            url=https://discord.com/oauth2/authorize?client_id=1525629900038475969,
+            url=BOT_INVITE_URL,
             style=discord.ButtonStyle.link, row=0))
 
     @discord.ui.button(label="📋  Copiar resultado",
                        style=discord.ButtonStyle.danger, row=1)
     async def copy_btn(self, interaction: discord.Interaction, _):
         await interaction.response.send_message(
-            content=f"`\n{self._r[:1800]}\n`", ephemeral=True)
+            content=f"```\n{self._r[:1800]}\n```", ephemeral=True)
 
 class FailView(View):
     def __init__(self, elapsed: float):
@@ -298,7 +292,7 @@ class FailView(View):
             disabled=True, row=0))
         self.add_item(Button(
             label="SUPPORT SERVER", emoji="💬",
-            url=
+            url=SUPPORT_SERVER_URL,
             style=discord.ButtonStyle.link, row=0))
 
 # ── BOT ──────────────────────────────────────────────────────────
@@ -567,8 +561,6 @@ def _guild_ticket_cfg(guild_id: int) -> dict:
     return ticket_config.get(str(guild_id), {})
 
 class TicketPanelView(View):
-    """Vista persistente con el botón para abrir un ticket. custom_id fijo
-    para que siga funcionando tras reiniciar el bot."""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -579,7 +571,6 @@ class TicketPanelView(View):
         await _create_ticket(interaction)
 
 class TicketCloseView(View):
-    """Vista persistente dentro de cada ticket, con botón de cierre."""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -607,7 +598,6 @@ async def _create_ticket(interaction: discord.Interaction):
             color=C_RED)
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
-    # Evita que un usuario tenga varios tickets abiertos a la vez
     existing = discord.utils.get(category.text_channels,
                                   topic=f"ticket-owner:{interaction.user.id}")
     if existing:
@@ -778,8 +768,6 @@ async def cmd_ticket_close(interaction: discord.Interaction):
 # ── SISTEMA DE GIVEAWAYS ─────────────────────────────────────────────
 
 GIVEAWAYS_FILE = "giveaways.json"
-# giveaways: { "<message_id>": {channel_id, guild_id, prize, winners, end_ts,
-#                                host_id, entries:[ids], ended: bool} }
 giveaways: dict = load_json(GIVEAWAYS_FILE, {})
 def _save_gw(): save_json(GIVEAWAYS_FILE, giveaways)
 
@@ -807,8 +795,6 @@ def embed_giveaway(prize: str, winners: int, end_ts: float, host_id: int, entrie
     return e
 
 class GiveawayView(View):
-    """Vista persistente; el custom_id es fijo y busca el giveaway por el
-    ID del mensaje al que está pegada, así funciona tras reiniciar el bot."""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -963,7 +949,6 @@ async def _gw_reroll_err(i, e):
 # ── SLASH — MODERACIÓN ───────────────────────────────────────────────
 
 WARNS_FILE = "warns.json"
-# warns: { "guild_id": { "user_id": [ {"reason":.., "mod_id":.., "ts":..} ] } }
 warns: dict = load_json(WARNS_FILE, {})
 def _save_warns(): save_json(WARNS_FILE, warns)
 
@@ -1195,11 +1180,9 @@ async def cmd_remind(interaction: discord.Interaction, duracion: str, mensaje: s
             except Exception: pass
 
     asyncio.create_task(_later())
-    # Nota: los recordatorios viven en memoria; si el bot se reinicia antes de
-    # que se cumpla el tiempo, ese recordatorio en particular se pierde.
 
 
-_afk_users: dict = {}   # user_id -> mensaje afk
+_afk_users: dict = {}
 
 @bot.tree.command(name="afk", description="Marca que estás AFK (ausente)")
 @app_commands.describe(mensaje="Motivo (opcional)")
@@ -1339,7 +1322,7 @@ async def cmd_help(interaction: discord.Interaction):
                f"`/help` — Esta lista"),
         inline=False)
     e.set_image(url=IMG_MAIN)
-    e.set_footer(text=f"SYSTEM MADE WITH 🔥  |  {_footer()}")
+    e.set_footer(text=_footer())
     v = View()
     v.add_item(Button(label="SUPPORT SERVER", emoji="💬", url=SUPPORT_SERVER_URL,
                       style=discord.ButtonStyle.link))
