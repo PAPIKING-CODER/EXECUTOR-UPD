@@ -1,5 +1,5 @@
 """
-KING BOT — Bypass + Fun Commands
+FMD BOT — Bypass + Fun Commands
 """
 import sys, types
 
@@ -35,7 +35,7 @@ except ImportError:
     pass
 
 # ── LOGGING ──────────────────────────────────────────────────────
-logger = logging.getLogger("KING")
+logger = logging.getLogger("FMD")
 logger.setLevel(logging.INFO)
 for _h in (RotatingFileHandler("bot.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"),
            logging.StreamHandler()):
@@ -49,11 +49,11 @@ SUPPORT_SERVER_URL = os.environ.get("SUPPORT_SERVER_URL", "https://discord.gg/nU
 BOT_INVITE_URL     = os.environ.get("BOT_INVITE_URL",
     "https://discord.com/oauth2/authorize?client_id=1525040833814855710")
 
-BOT_NAME   = "KING BOT"
+BOT_NAME   = "FMD BOT"
 BOT_CREDIT = "BY KING"
-# Palabra que activa los comandos por texto, ej: "king afk", "king ping".
+# Palabra que activa los comandos por texto, ej: "fmd afk", "fmd ping".
 # Cambialo con la variable de entorno BOT_TRIGGER si quieres otra palabra.
-BOT_TRIGGER = os.environ.get("BOT_TRIGGER", "king")
+BOT_TRIGGER = os.environ.get("BOT_TRIGGER", "fmd")
 
 BYPASS_API_URL = "https://4pi-bypass.vercel.app/api/bypass?url="
 BYPASS_TIMEOUT = 30
@@ -158,7 +158,7 @@ def _footer() -> str:
 _KEYS = ("content","result","loadstring","bypassed","bypassed_link",
          "bypassed_url","final_url","destination","url","link","key","output")
 _http = requests.Session()
-_http.headers.update({"User-Agent": "KingBot/1.0"})
+_http.headers.update({"User-Agent": "FMDBot/1.0"})
 
 def _extract(data):
     if isinstance(data, dict):
@@ -318,8 +318,8 @@ class FailView(View):
 
 def _get_prefix(_bot, message: discord.Message):
     """Permite activar comandos escribiendo el nombre/trigger del bot,
-    ej: 'king afk', 'king ping', 'KING BOT help'. También responde a
-    mención directa (@KING BOT comando)."""
+    ej: 'fmd afk', 'fmd ping', 'FMD BOT help'. También responde a
+    mención directa (@FMD BOT comando)."""
     content = message.content or ""
     low = content.lower()
     prefixes = []
@@ -2800,7 +2800,7 @@ async def cmd_help(interaction: discord.Interaction):
 
 # ── COMANDOS POR PREFIJO (nombre del bot) ────────────────────────────
 # Estos responden cuando escribes el nombre/trigger del bot antes del
-# comando, ej:  "king ping"   "KING BOT afk estudiando"   "king 8ball ...?"
+# comando, ej:  "fmd ping"   "FMD BOT afk estudiando"   "fmd 8ball ...?"
 # Sirven como atajo rápido para los comandos más usados; para las opciones
 # avanzadas (con varios parámetros, como /ticket-setup o /giveaway-start)
 # usa siempre el comando slash correspondiente.
