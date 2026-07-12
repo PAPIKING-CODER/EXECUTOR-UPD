@@ -2,6 +2,15 @@
 FMD BOT — Executor Tracker · Bypass Engine · Groq IA
 Render Web Service compatible (binds PORT for health check).
 """
+import sys, types
+
+# ── audioop mock (removed in Python 3.13+, needed by discord.py player.py) ──
+try:
+    import audioop
+except ImportError:
+    _mock = types.ModuleType("audioop")
+    sys.modules["audioop"] = _mock
+
 import os, re, json, time, asyncio, logging
 from datetime import datetime, timezone, timedelta
 from logging.handlers import RotatingFileHandler
