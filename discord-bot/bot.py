@@ -1,5 +1,5 @@
 """
-FMD BOT — Bypass + Executor Alerts
+KING BOT — Bypass + Fun Commands
 """
 import sys, types
 
@@ -8,7 +8,7 @@ try:
 except ImportError:
     sys.modules["audioop"] = types.ModuleType("audioop")
 
-import os, re, json, time, asyncio, logging, threading
+import os, re, json, time, asyncio, logging, threading, random
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
@@ -17,7 +17,6 @@ from urllib.parse import quote
 import discord
 from discord import app_commands
 from discord.ui import Button, View
-from discord.ext import tasks
 import requests
 
 try:
@@ -26,7 +25,7 @@ except ImportError:
     pass
 
 # ── LOGGING ──────────────────────────────────────────────────────
-logger = logging.getLogger("FMD")
+logger = logging.getLogger("KING")
 logger.setLevel(logging.INFO)
 for _h in (RotatingFileHandler("bot.log", maxBytes=1_000_000, backupCount=2, encoding="utf-8"),
            logging.StreamHandler()):
@@ -40,7 +39,7 @@ SUPPORT_SERVER_URL = os.environ.get("SUPPORT_SERVER_URL", "https://discord.gg/nU
 BOT_INVITE_URL     = os.environ.get("BOT_INVITE_URL",
     "https://discord.com/oauth2/authorize?client_id=1525040833814855710")
 
-BOT_NAME   = "FMD BOT"
+BOT_NAME   = "KING BOT"
 BOT_CREDIT = "BY KING"
 
 BYPASS_API_URL = "https://4pi-bypass.vercel.app/api/bypass?url="
@@ -48,36 +47,36 @@ BYPASS_TIMEOUT = 30
 BYPASS_RETRIES = 3
 BYPASS_DELAY   = 3
 
-WEAO_API       = "https://api.weao.xyz/v1/exploits"
-CHECK_INTERVAL = 90
-
-CONFIG_FILE     = "config.json"
-STATE_FILE      = "estado_anterior.json"
 AUTOBYPASS_FILE = "autobypass_channels.json"
 
 # ── COLORES ──────────────────────────────────────────────────────
-C_MAIN    = 0xB026FF
-C_SUCCESS = 0x57F287
-C_ERROR   = 0xED4245
-C_WARN    = 0xFEE75C
-C_INFO    = 0x5865F2
+C_RED   = 0xC80000   # rojo oscuro principal
+C_DARK  = 0x1A0000   # casi negro con tono rojo
+C_WARN  = 0xFF4500   # rojo-naranja para loading
+C_INFO  = 0x8B0000   # rojo profundo
 
-# ── TUS IMÁGENES ─────────────────────────────────────────────────
-IMG_MAIN    = "https://cdn.discordapp.com/attachments/1525556800579965058/1525566942281465876/ezgif-35ed139046075f14_1.gif?ex=6a53da6e&is=6a5288ee&hm=1f2c78e97d4a8d8ef46a52d25480674f993989ed7729172febf795a6ecc32bd6&"
-EMOJI_GREEN = "https://cdn.discordapp.com/emojis/1425942717208199389.webp?size=100&animated=true"
-EMOJI_OK    = "https://cdn.discordapp.com/emojis/1525379448768303207.webp?size=100&animated=true"
-EMOJI_LINK  = "https://cdn.discordapp.com/emojis/1401389059485597836.webp?size=100&animated=true"
+# ── IMAGEN PRINCIPAL ─────────────────────────────────────────────
+IMG_MAIN = "https://cdn.discordapp.com/attachments/1525427252400099381/1525750876155805847/ezgif-37d313baab956afc.gif?ex=6a5485bb&is=6a53343b&hm=f6df69c459c7bad9ed031d12eee35f42ab4adbb7290fe08a3707046eb3bf7200&"
 
-GIF_LOADING = "https://media.tenor.com/wpSo-8CrXqUAAAAi/loading-loading-forever.gif"
+# ── TUS EMOJIS ───────────────────────────────────────────────────
+E_CHECK   = "<a:_:1511381303872716820>"   # ✅ check mark
+E_REDPT   = "<a:_:1463164698353733725>"   # 🔴 red point
+E_WARN    = "<:_:1495901573476520106>"    # ⚠️ warning
+E_RDIAM   = "<a:_:1469195655762153502>"   # 💎 red diamond
+E_ARROW   = "<a:_:1401389285042684035>"   # ➡️ arrow
+E_CROWN   = "<a:_:1461735621985833061>"   # 👑 red crown
+E_NO      = "<a:_:606562703917449226>"    # ❌ no
+E_LOAD    = "<a:_:1463540610379022429>"   # ⏳ load
+E_USER    = "👤"  # persona
 
-DEFAULT_EXPLOITS = [
-    "Solara","Wave","AWP","Vega X","Delta","Hydrogen","Fluxus",
-    "Electron","Nihon","Celestial","Velocity","Oxygen U","Comet",
-    "Zypher","Krnl","Synapse X","Script-Ware","Evon","JJSploit",
-    "Coco","Zen","Borealis","Sirius","Xeno","Rise","Valyse",
-    "Elysian","Novus","Vynixius","Seliware","Exoliner","Neo",
-    "Trigon","Eclipse","Arceus X","Aurora","Nexus","Carbon",
-]
+# URLs de las imágenes para set_thumbnail / set_author
+URL_CHECK  = "https://cdn.discordapp.com/emojis/1511381303872716820.webp?size=100&animated=true"
+URL_REDPT  = "https://cdn.discordapp.com/emojis/1463164698353733725.webp?size=100&animated=true"
+URL_WARN   = "https://cdn.discordapp.com/emojis/1495901573476520106.webp?size=100"
+URL_RDIAM  = "https://cdn.discordapp.com/emojis/1469195655762153502.webp?size=100&animated=true"
+URL_CROWN  = "https://cdn.discordapp.com/emojis/1461735621985833061.webp?size=100&animated=true"
+URL_NO     = "https://cdn.discordapp.com/emojis/606562703917449226.webp?size=100&animated=true"
+URL_LOAD   = "https://cdn.discordapp.com/emojis/1463540610379022429.webp?size=100&animated=true"
 
 BOT_START = datetime.now(timezone.utc)
 
@@ -113,20 +112,14 @@ def _uptime() -> str:
     h, r = divmod(t, 3600); m, s = divmod(r, 60)
     return f"{h}h {m}m {s}s"
 
-def _ts() -> str:
-    return datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+def _footer() -> str:
+    return f"{BOT_NAME} • {BOT_CREDIT}"
 
-def _status_e(s: str) -> str:
-    s = (s or "").lower()
-    if s == "online":  return "🟢"
-    if s == "patched": return "🔴"
-    return "🟡"
-
-# ── BYPASS ───────────────────────────────────────────────────────
+# ── BYPASS ENGINE ────────────────────────────────────────────────
 _KEYS = ("content","result","loadstring","bypassed","bypassed_link",
          "bypassed_url","final_url","destination","url","link","key","output")
 _http = requests.Session()
-_http.headers.update({"User-Agent": "FMD-Bot/1.0"})
+_http.headers.update({"User-Agent": "KingBot/1.0"})
 
 def _extract(data):
     if isinstance(data, dict):
@@ -153,7 +146,7 @@ def _bypass_sync(url: str):
     for attempt in range(1, BYPASS_RETRIES + 1):
         try:
             resp = _http.get(BYPASS_API_URL + quote(url, safe=""), timeout=BYPASS_TIMEOUT)
-            if resp.status_code not in (200,):
+            if resp.status_code != 200:
                 last_err = f"HTTP {resp.status_code}"
                 if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
                 return None, last_err
@@ -184,67 +177,102 @@ def _bypass_sync(url: str):
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
     return None, last_err
 
-# ── EMBEDS ───────────────────────────────────────────────────────
+# ── BYPASS EMBEDS  (diseño foto 2, tema rojo) ─────────────────────
 
-def embed_bypass_ok(result: str, elapsed: float, url: str) -> discord.Embed:
-    e = discord.Embed(color=C_SUCCESS, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_GREEN)
-    e.set_thumbnail(url=EMOJI_OK)
-    e.add_field(name="🔗 URL",       value=f"```\n{url[:200]}\n```",        inline=False)
-    e.add_field(name="✅ RESURTADO", value=f"```\n{result[:900]}\n```",      inline=False)
-    e.add_field(name="⏱️ Tiempo",    value=f"`{elapsed:.2f}s`",              inline=True)
-    e.add_field(name="📅 Fecha",     value=f"`{_ts()}`",                     inline=True)
+def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> discord.Embed:
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"BYPASSED SUCCESSFULLY", icon_url=URL_CHECK)
+    e.set_thumbnail(url=URL_CHECK)
+    e.add_field(
+        name=f"{E_RDIAM} ─ RESULT",
+        value=f"```\n{result[:900]}\n```",
+        inline=False
+    )
+    e.add_field(
+        name=f"{E_USER} ─ REQUEST BY",
+        value=user.mention,
+        inline=False
+    )
+    e.add_field(
+        name=f"{E_ARROW} ─ URL",
+        value=f"```\n{url[:200]}\n```",
+        inline=False
+    )
     e.set_image(url=IMG_MAIN)
-    e.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
+    e.set_footer(text=f"SYSTEM MADE WITH 🔥  |  {_footer()}")
     return e
 
-def embed_bypass_fail(error: str, url: str, elapsed: float) -> discord.Embed:
-    e = discord.Embed(color=C_ERROR, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_LINK)
-    e.add_field(name="🔗 URL",    value=f"```\n{url[:200]}\n```",   inline=False)
-    e.add_field(name="❌ Error",  value=f"```\n{error or '?'}\n```", inline=False)
-    e.add_field(name="⏱️ Tiempo", value=f"`{int(elapsed*1000)}ms`", inline=True)
-    e.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
+def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> discord.Embed:
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name="BYPASS FAILED", icon_url=URL_NO)
+    e.set_thumbnail(url=URL_NO)
+    e.add_field(
+        name=f"{E_RDIAM} ─ URL",
+        value=f"```\n{url[:200]}\n```",
+        inline=False
+    )
+    e.add_field(
+        name=f"{E_WARN} ─ ERROR",
+        value=f"```\n{error or '?'}\n```",
+        inline=False
+    )
+    e.add_field(
+        name=f"{E_USER} ─ REQUEST BY",
+        value=user.mention,
+        inline=False
+    )
+    e.set_image(url=IMG_MAIN)
+    e.set_footer(text=f"SYSTEM MADE WITH 🔥  |  {_footer()}")
+    return e
+
+def embed_loading() -> discord.Embed:
+    e = discord.Embed(color=C_WARN, timestamp=datetime.now(timezone.utc))
+    e.set_author(name="PROCESSING BYPASS...", icon_url=URL_LOAD)
+    e.set_thumbnail(url=URL_LOAD)
+    e.description = f"{E_LOAD} Bypass en proceso, espera un momento..."
+    e.set_footer(text=_footer())
     return e
 
 # ── VIEWS ────────────────────────────────────────────────────────
 
 class BypassView(View):
-    def __init__(self, result: str):
+    def __init__(self, result: str, elapsed: float):
         super().__init__(timeout=None)
         self._r = result
-        self.add_item(Button(label="Soporte",     emoji="💬", url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link, row=0))
-        self.add_item(Button(label="Invitar Bot", emoji="🤖", url=BOT_INVITE_URL,     style=discord.ButtonStyle.link, row=0))
+        self.add_item(Button(
+            label=f"⏰  {elapsed:.2f}s",
+            style=discord.ButtonStyle.secondary,
+            disabled=True, row=0))
+        self.add_item(Button(
+            label="SUPPORT SERVER", emoji="💬",
+            url=SUPPORT_SERVER_URL,
+            style=discord.ButtonStyle.link, row=0))
+        self.add_item(Button(
+            label="INVITE ME", emoji="🤖",
+            url=BOT_INVITE_URL,
+            style=discord.ButtonStyle.link, row=0))
 
-    @discord.ui.button(label="📋 Copiar RESURTADO", style=discord.ButtonStyle.success, row=1)
+    @discord.ui.button(label="📋  Copiar RESURTADO",
+                       style=discord.ButtonStyle.danger, row=1)
     async def copy_btn(self, interaction: discord.Interaction, _):
         await interaction.response.send_message(
             content=f"```\n{self._r[:1800]}\n```", ephemeral=True)
 
-class ErrorView(View):
-    def __init__(self):
+class FailView(View):
+    def __init__(self, elapsed: float):
         super().__init__(timeout=None)
-        self.add_item(Button(label="Soporte", emoji="💬", url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link))
-
-# ── WEAO ─────────────────────────────────────────────────────────
-
-def _weao_sync() -> dict:
-    try:
-        resp = _http.get(WEAO_API, timeout=15)
-        if resp.status_code == 200:
-            raw = resp.json()
-            lst = raw if isinstance(raw, list) else raw.get("exploits", raw.get("data", []))
-            return {item.get("name","").lower(): item for item in lst if item.get("name")}
-    except Exception as ex:
-        logger.warning(f"[WEAO] {ex}")
-    return {}
-
-async def fetch_exploits() -> dict:
-    return await asyncio.get_running_loop().run_in_executor(None, _weao_sync)
+        self.add_item(Button(
+            label=f"⏰  {elapsed:.2f}s",
+            style=discord.ButtonStyle.secondary,
+            disabled=True, row=0))
+        self.add_item(Button(
+            label="SUPPORT SERVER", emoji="💬",
+            url=SUPPORT_SERVER_URL,
+            style=discord.ButtonStyle.link, row=0))
 
 # ── BOT ──────────────────────────────────────────────────────────
 
-class FMDBot(discord.Client):
+class KingBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
@@ -258,8 +286,6 @@ class FMDBot(discord.Client):
         logger.info(f"✅ {BOT_NAME} online como {self.user} | {len(self.guilds)} servidor(es)")
         await self.change_presence(activity=discord.Activity(
             type=discord.ActivityType.listening, name=f"/help • {BOT_NAME}"))
-        if not exploit_check.is_running():
-            exploit_check.start()
 
     async def on_message(self, message: discord.Message):
         if message.author.bot: return
@@ -268,7 +294,7 @@ class FMDBot(discord.Client):
             if urls:
                 asyncio.create_task(_auto_bypass(message, urls))
 
-bot = FMDBot()
+bot = KingBot()
 
 # ── AUTO-BYPASS ───────────────────────────────────────────────────
 
@@ -278,13 +304,8 @@ async def _auto_bypass(message: discord.Message, urls: list):
     loop = asyncio.get_running_loop()
     for url in urls[:3]:
         if not _is_url(url): continue
-        loading = discord.Embed(
-            description="```\nProcesando bypass...\n```",
-            color=C_WARN, timestamp=datetime.now(timezone.utc))
-        loading.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_GREEN)
-        loading.set_thumbnail(url=GIF_LOADING)
-        loading.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
-        try: msg = await message.channel.send(content=message.author.mention, embed=loading)
+        try: msg = await message.channel.send(
+            content=message.author.mention, embed=embed_loading())
         except Exception: continue
         t0 = time.time()
         result, error = await loop.run_in_executor(None, _bypass_sync, url)
@@ -292,236 +313,248 @@ async def _auto_bypass(message: discord.Message, urls: list):
         try:
             if result:
                 await msg.edit(content=message.author.mention,
-                               embed=embed_bypass_ok(result, elapsed, url), view=BypassView(result))
+                               embed=embed_ok(result, elapsed, url, message.author),
+                               view=BypassView(result, elapsed))
             else:
                 await msg.edit(content=message.author.mention,
-                               embed=embed_bypass_fail(error, url, elapsed), view=ErrorView())
+                               embed=embed_fail(error, url, elapsed, message.author),
+                               view=FailView(elapsed))
         except Exception: pass
 
-# ── EXECUTOR ALERTS ───────────────────────────────────────────────
-
-@tasks.loop(seconds=CHECK_INTERVAL)
-async def exploit_check():
-    config   = load_json(CONFIG_FILE, {})
-    previous = load_json(STATE_FILE, {})
-    api_data = await fetch_exploits()
-    if not api_data: return
-    changed = False
-    for guild_id, gcfg in config.items():
-        if not gcfg.get("enabled"): continue
-        ch_id = gcfg.get("channel_id")
-        if not ch_id or ch_id == "none": continue
-        guild = bot.get_guild(int(guild_id))
-        if not guild: continue
-        channel = guild.get_channel(int(ch_id))
-        if not channel: continue
-        role_id = gcfg.get("role_id")
-        for exp_name in gcfg.get("exploits", DEFAULT_EXPLOITS):
-            info = api_data.get(exp_name.lower())
-            if not info: continue
-            real    = info.get("name", exp_name)
-            key     = f"{guild_id}_{real.lower()}"
-            cur_st  = info.get("status", "Unknown")
-            cur_ver = info.get("version", "N/A")
-            prev    = previous.get(key, {})
-            previous[key] = {"status": cur_st, "version": cur_ver}
-            changed = True
-            if prev.get("status") == cur_st and prev.get("version") == cur_ver: continue
-            is_on = cur_st.lower() == "online"
-            color = C_SUCCESS if is_on else (C_ERROR if cur_st.lower()=="patched" else C_WARN)
-            dl    = info.get("download", info.get("download_link", info.get("link", None)))
-            embed = discord.Embed(
-                title=f"{_status_e(cur_st)}  {real}",
-                color=color, timestamp=datetime.now(timezone.utc))
-            embed.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}",
-                             icon_url=EMOJI_GREEN if is_on else EMOJI_LINK)
-            embed.set_thumbnail(url=EMOJI_OK if is_on else EMOJI_LINK)
-            if prev.get("status") and prev["status"] != cur_st:
-                embed.add_field(name="Estado",  value=f"`{prev['status']}` → **{cur_st}**", inline=True)
-            if prev.get("version") and prev["version"] != cur_ver:
-                embed.add_field(name="Versión", value=f"`{prev['version']}` → `{cur_ver}`", inline=True)
-            embed.add_field(name="Versión actual", value=f"`{cur_ver}`",              inline=True)
-            if dl:
-                embed.add_field(name="Descarga", value=f"[⬇️ Descargar]({dl})",      inline=False)
-            embed.set_image(url=IMG_MAIN)
-            embed.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
-            mention = "@everyone"
-            if role_id:
-                role = guild.get_role(int(role_id))
-                if role: mention = role.mention
-            try:
-                await channel.send(content=mention, embed=embed)
-            except Exception as ex:
-                logger.error(f"[alert] {ex}")
-    if changed: save_json(STATE_FILE, previous)
-
-@exploit_check.before_loop
-async def _before():
-    await bot.wait_until_ready()
-    await asyncio.sleep(15)
-
-# ── SETUP VIEW ────────────────────────────────────────────────────
-
-class SetupView(discord.ui.View):
-    def __init__(self, guild, cfg):
-        super().__init__(timeout=180)
-        self.guild = guild
-        self.cfg   = cfg.copy()
-        txt_chs = [c for c in guild.channels if isinstance(c, discord.TextChannel)][:25]
-        ch_opts = [discord.SelectOption(label=f"#{c.name}", value=str(c.id),
-                    default=(str(c.id)==str(cfg.get("channel_id","")))) for c in txt_chs] \
-                  or [discord.SelectOption(label="Sin canales", value="none")]
-        chs = discord.ui.Select(placeholder="Canal de alertas", options=ch_opts, row=0)
-        chs.callback = self._ch
-        self.add_item(chs)
-        roles = [r for r in guild.roles if r.name != "@everyone"][:24]
-        r_opts = [discord.SelectOption(label="@everyone", value="none", default=not cfg.get("role_id"))]
-        r_opts += [discord.SelectOption(label=f"@{r.name}", value=str(r.id),
-                    default=(str(r.id)==str(cfg.get("role_id","")))) for r in roles]
-        rs = discord.ui.Select(placeholder="Rol a mencionar", options=r_opts[:25], row=1)
-        rs.callback = self._role
-        self.add_item(rs)
-
-    async def _ch(self, i):
-        self.cfg["channel_id"] = i.data["values"][0]
-        await i.response.defer()
-
-    async def _role(self, i):
-        v = i.data["values"][0]
-        self.cfg["role_id"] = None if v == "none" else v
-        await i.response.defer()
-
-    @discord.ui.button(label="✅ Activar",    style=discord.ButtonStyle.success, row=2)
-    async def _on(self, i, _):
-        self.cfg["enabled"] = True
-        await i.response.send_message("✅ Alertas activadas.", ephemeral=True)
-
-    @discord.ui.button(label="🔕 Desactivar", style=discord.ButtonStyle.danger, row=2)
-    async def _off(self, i, _):
-        self.cfg["enabled"] = False
-        await i.response.send_message("🔕 Alertas desactivadas.", ephemeral=True)
-
-    @discord.ui.button(label="💾 Guardar", style=discord.ButtonStyle.primary, row=3)
-    async def _save(self, i, _):
-        cfg = load_json(CONFIG_FILE, {})
-        gid = str(self.guild.id)
-        cfg.setdefault(gid, {}).update(self.cfg)
-        cfg[gid].setdefault("exploits", DEFAULT_EXPLOITS)
-        save_json(CONFIG_FILE, cfg)
-        ch   = self.guild.get_channel(int(self.cfg["channel_id"])) \
-               if self.cfg.get("channel_id","") not in ("none","") else None
-        role = self.guild.get_role(int(self.cfg["role_id"])) if self.cfg.get("role_id") else None
-        e = discord.Embed(title="✅ Guardado", color=C_SUCCESS)
-        e.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_OK)
-        e.add_field(name="Canal",   value=ch.mention   if ch   else "No configurado", inline=True)
-        e.add_field(name="Rol",     value=role.mention if role else "@everyone",       inline=True)
-        e.add_field(name="Alertas", value="✅ Activas" if self.cfg.get("enabled") else "🔕 Off", inline=True)
-        await i.response.edit_message(embed=e, view=None)
-        self.stop()
-
-# ── COMANDOS ──────────────────────────────────────────────────────
+# ── SLASH — BYPASS ────────────────────────────────────────────────
 
 @bot.tree.command(name="bypass", description="Bypassea un enlace")
 @app_commands.describe(url="Enlace a bypassear")
 async def cmd_bypass(interaction: discord.Interaction, url: str):
     if not _is_url(url):
-        return await interaction.response.send_message(
-            embed=discord.Embed(description="URL inválida.", color=C_ERROR), ephemeral=True)
-    loading = discord.Embed(
-        description="```\nProcesando bypass...\n```",
-        color=C_WARN, timestamp=datetime.now(timezone.utc))
-    loading.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_GREEN)
-    loading.set_thumbnail(url=GIF_LOADING)
-    loading.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
-    await interaction.response.send_message(embed=loading)
+        e = discord.Embed(description=f"{E_WARN} URL inválida.", color=C_RED)
+        e.set_footer(text=_footer())
+        return await interaction.response.send_message(embed=e, ephemeral=True)
+    await interaction.response.send_message(embed=embed_loading())
     t0 = time.time()
     result, error = await asyncio.get_running_loop().run_in_executor(None, _bypass_sync, url)
     elapsed = time.time() - t0
     if result:
         await interaction.edit_original_response(
-            embed=embed_bypass_ok(result, elapsed, url), view=BypassView(result))
+            embed=embed_ok(result, elapsed, url, interaction.user),
+            view=BypassView(result, elapsed))
     else:
         await interaction.edit_original_response(
-            embed=embed_bypass_fail(error, url, elapsed), view=ErrorView())
+            embed=embed_fail(error, url, elapsed, interaction.user),
+            view=FailView(elapsed))
 
 
-@bot.tree.command(name="setautobypass", description="Activa o desactiva el auto-bypass en este canal")
+@bot.tree.command(name="setautobypass",
+                  description="Activa o desactiva auto-bypass en este canal")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_setautobypass(interaction: discord.Interaction):
     cid = interaction.channel_id
     if cid in autobypass_channels:
         autobypass_channels.discard(cid); _save_ab()
         e = discord.Embed(
-            description=f"Auto-bypass **desactivado** en {interaction.channel.mention}.",
-            color=C_ERROR)
+            description=f"{E_NO} Auto-bypass **desactivado** en {interaction.channel.mention}.",
+            color=C_RED)
     else:
         autobypass_channels.add(cid); _save_ab()
         e = discord.Embed(
-            description=f"Auto-bypass **activado** en {interaction.channel.mention}.\nLos enlaces se bypasean automáticamente.",
-            color=C_SUCCESS)
-    e.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_GREEN)
-    e.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
+            description=(f"{E_CHECK} Auto-bypass **activado** en {interaction.channel.mention}.\n"
+                         f"{E_ARROW} Los enlaces se bypasean automáticamente."),
+            color=C_RED)
+    e.set_author(name=BOT_NAME, icon_url=URL_CROWN)
+    e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @cmd_setautobypass.error
 async def _ae(i, e):
     if isinstance(e, app_commands.MissingPermissions):
-        await i.response.send_message("Necesitas permisos de **Administrador**.", ephemeral=True)
+        await i.response.send_message(
+            f"{E_WARN} Necesitas **Administrador**.", ephemeral=True)
+
+# ── SLASH — FUN ───────────────────────────────────────────────────
+
+_8BALL = [
+    "Sí, definitivamente.",  "Sin duda alguna.",      "Puedes contar con ello.",
+    "Así es.",               "Muy probable.",          "Todo indica que sí.",
+    "Buenas perspectivas.",  "Parece que sí.",         "Respuesta dudosa, intenta de nuevo.",
+    "Pregúntame luego.",     "Mejor no decirte ahora.","No puedo predecirlo.",
+    "No cuentes con ello.",  "Mi respuesta es no.",    "Mis fuentes dicen que no.",
+    "Las perspectivas no son buenas.", "Muy dudoso.",
+]
+
+@bot.tree.command(name="8ball", description="Pregúntale a la bola mágica 🎱")
+@app_commands.describe(pregunta="Tu pregunta")
+async def cmd_8ball(interaction: discord.Interaction, pregunta: str):
+    resp = random.choice(_8BALL)
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 🎱 Magic 8-Ball", icon_url=URL_CROWN)
+    e.add_field(name=f"{E_RDIAM} Pregunta",  value=f"```{pregunta[:300]}```", inline=False)
+    e.add_field(name=f"{E_ARROW} Respuesta", value=f"```{resp}```",           inline=False)
+    e.set_footer(text=_footer())
+    await interaction.response.send_message(embed=e)
 
 
-@bot.tree.command(name="set", description="Configura las alertas automáticas de executors")
-@app_commands.default_permissions(manage_guild=True)
-async def cmd_set(interaction: discord.Interaction):
-    cfg  = load_json(CONFIG_FILE, {})
-    gcfg = cfg.get(str(interaction.guild_id), {})
-    ch_v = f"<#{gcfg['channel_id']}>" if gcfg.get("channel_id") else "No configurado"
-    rl_v = f"<@&{gcfg['role_id']}>"   if gcfg.get("role_id")    else "@everyone"
-    en_v = "✅ Activas" if gcfg.get("enabled") else "🔕 Desactivadas"
-    e = discord.Embed(
-        description=f"**Canal:** {ch_v}\n**Rol:** {rl_v}\n**Alertas:** {en_v}",
-        color=C_MAIN)
-    e.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_GREEN)
-    e.set_image(url=IMG_MAIN)
-    e.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
-    await interaction.response.send_message(embed=e, view=SetupView(interaction.guild, gcfg), ephemeral=True)
+_JOKES = [
+    ("¿Por qué los pájaros vuelan hacia el sur en invierno?", "Porque caminando les da pereza."),
+    ("¿Qué le dijo un semáforo al otro?",          "No me mires, que me estoy cambiando."),
+    ("¿Cómo se llama el campeón de buceo de Japón?", "Tokofondo."),
+    ("¿Qué hace una abeja en el gimnasio?",        "¡Zum-ba!"),
+    ("¿Por qué el libro de matemáticas estaba triste?", "Porque tenía muchos problemas."),
+    ("¿Qué le dice un jardinero a otro?",          "¡Me tienes harto-nsia!"),
+    ("¿Cómo se dice 'pez' en inglés?",             "Fish... bueno, así de fácil era."),
+    ("¿Qué hace un pez cuando está aburrido?",     "Nada."),
+    ("¿Qué le dijo un techo al otro techo?",       "Nada, los techos no hablan."),
+    ("¿Cómo muere un químico?",                    "De nitrógeno."),
+]
 
+@bot.tree.command(name="joke", description="Un chiste aleatorio 😂")
+async def cmd_joke(interaction: discord.Interaction):
+    setup, punchline = random.choice(_JOKES)
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 😂 Chiste", icon_url=URL_CROWN)
+    e.add_field(name=f"{E_RDIAM} Pregunta",   value=f"```{setup}```",    inline=False)
+    e.add_field(name=f"{E_ARROW} Respuesta",  value=f"```{punchline}```", inline=False)
+    e.set_footer(text=_footer())
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="coinflip", description="Lanza una moneda 🪙")
+async def cmd_coinflip(interaction: discord.Interaction):
+    result = random.choice(["🦅 CARA", "🔵 CRUZ"])
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 🪙 Moneda", icon_url=URL_CROWN)
+    e.add_field(name=f"{E_RDIAM} Resultado",    value=f"```{result}```",       inline=False)
+    e.add_field(name=f"{E_USER} Lanzado por",   value=interaction.user.mention, inline=False)
+    e.set_footer(text=_footer())
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="roll", description="Lanza un dado 🎲")
+@app_commands.describe(lados="Número de caras del dado (por defecto 6)")
+async def cmd_roll(interaction: discord.Interaction, lados: int = 6):
+    if lados < 2 or lados > 1000:
+        return await interaction.response.send_message(
+            f"{E_WARN} El dado debe tener entre 2 y 1000 caras.", ephemeral=True)
+    result = random.randint(1, lados)
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 🎲 Dado d{lados}", icon_url=URL_CROWN)
+    e.add_field(name=f"{E_RDIAM} Resultado",  value=f"```🎲 {result} / {lados}```",  inline=False)
+    e.add_field(name=f"{E_USER} Lanzado por", value=interaction.user.mention,          inline=False)
+    e.set_footer(text=_footer())
+    await interaction.response.send_message(embed=e)
+
+
+_ROASTS = [
+    "Eres tan lento que tardas 2 horas en ver 60 Minutes.",
+    "Si la inteligencia fuera agua, estarías en el desierto.",
+    "Eres la razón por la que los instructivos tienen advertencias.",
+    "Te busqué en el diccionario bajo la palabra 'mediocre'... foto perfecta.",
+    "Eres como una nube: cuando desapareces el día mejora.",
+    "La evolución dio marcha atrás contigo.",
+    "Tienes cara de que tu árbol genealógico es un cactus.",
+    "Eres tan aburrido que te pusiste a dormir en tu propio sueño.",
+    "Tu red Wi-Fi tiene mejor señal que tu cerebro.",
+    "Si fueras más inútil, tendrías que regarme dos veces por semana.",
+]
+
+@bot.tree.command(name="roast", description="Insulto suave a alguien 🔥")
+@app_commands.describe(usuario="Usuario a incinerar")
+async def cmd_roast(interaction: discord.Interaction, usuario: discord.Member):
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 🔥 Roast", icon_url=URL_CROWN)
+    e.add_field(name=f"{E_RDIAM} Víctima",  value=usuario.mention,          inline=True)
+    e.add_field(name=f"{E_USER} Por",       value=interaction.user.mention,  inline=True)
+    e.add_field(name=f"{E_ARROW} Veredicto",value=f"```{random.choice(_ROASTS)}```", inline=False)
+    e.set_footer(text=_footer())
+    await interaction.response.send_message(embed=e)
+
+
+_RPS_MAP = {"piedra": "🪨", "papel": "📄", "tijeras": "✂️"}
+_RPS_WIN = {("piedra","tijeras"),("tijeras","papel"),("papel","piedra")}
+
+@bot.tree.command(name="rps", description="Piedra, Papel o Tijeras ✊")
+@app_commands.describe(eleccion="Tu elección")
+@app_commands.choices(eleccion=[
+    app_commands.Choice(name="Piedra 🪨",  value="piedra"),
+    app_commands.Choice(name="Papel 📄",   value="papel"),
+    app_commands.Choice(name="Tijeras ✂️", value="tijeras"),
+])
+async def cmd_rps(interaction: discord.Interaction, eleccion: str):
+    bot_pick = random.choice(list(_RPS_MAP.keys()))
+    if eleccion == bot_pick:
+        outcome = "🟡 EMPATE"
+    elif (eleccion, bot_pick) in _RPS_WIN:
+        outcome = f"{E_CHECK} GANASTE"
+    else:
+        outcome = f"{E_NO} PERDISTE"
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — ✊ Piedra Papel Tijeras", icon_url=URL_CROWN)
+    e.add_field(name=f"{E_USER} Tú",         value=f"```{_RPS_MAP[eleccion]} {eleccion.upper()}```", inline=True)
+    e.add_field(name=f"{E_CROWN} {BOT_NAME}", value=f"```{_RPS_MAP[bot_pick]} {bot_pick.upper()}```", inline=True)
+    e.add_field(name=f"{E_ARROW} Resultado",  value=f"```{outcome}```",                               inline=False)
+    e.set_footer(text=_footer())
+    await interaction.response.send_message(embed=e)
+
+
+@bot.tree.command(name="say", description="Haz que el bot diga algo")
+@app_commands.describe(mensaje="Mensaje a decir")
+@app_commands.checks.has_permissions(manage_messages=True)
+async def cmd_say(interaction: discord.Interaction, mensaje: str):
+    await interaction.response.send_message("✅ Enviado.", ephemeral=True)
+    await interaction.channel.send(mensaje[:2000])
+
+@cmd_say.error
+async def _say_err(i, e):
+    if isinstance(e, app_commands.MissingPermissions):
+        await i.response.send_message(f"{E_WARN} Necesitas **Gestionar mensajes**.", ephemeral=True)
+
+
+# ── SLASH — UTILIDAD ──────────────────────────────────────────────
 
 @bot.tree.command(name="ping", description="Ver latencia del bot")
 async def cmd_ping(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
-    color = C_SUCCESS if ms < 100 else (C_WARN if ms < 200 else C_ERROR)
-    e = discord.Embed(color=color)
-    e.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_GREEN)
-    e.add_field(name="📡 Latencia",   value=f"`{ms}ms`",             inline=True)
-    e.add_field(name="⏱️ Uptime",     value=f"`{_uptime()}`",        inline=True)
-    e.add_field(name="🌐 Servidores", value=f"`{len(bot.guilds)}`",   inline=True)
-    e.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
+    bar = "🟥" * min(10, ms // 20)
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 🏓 Ping", icon_url=URL_CROWN)
+    e.add_field(name=f"{E_RDIAM} Latencia",   value=f"```{ms}ms```",       inline=True)
+    e.add_field(name=f"{E_ARROW} Uptime",      value=f"```{_uptime()}```",  inline=True)
+    e.add_field(name=f"{E_CROWN} Servidores",  value=f"```{len(bot.guilds)}```", inline=True)
+    if bar: e.add_field(name="Señal", value=bar, inline=False)
+    e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e)
 
 
 @bot.tree.command(name="help", description="Ver todos los comandos")
 async def cmd_help(interaction: discord.Interaction):
-    e = discord.Embed(color=C_MAIN, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"{BOT_NAME} • {BOT_CREDIT}", icon_url=EMOJI_GREEN)
-    e.set_thumbnail(url=EMOJI_OK)
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — Comandos", icon_url=URL_CROWN)
+    e.set_thumbnail(url=URL_CROWN)
     e.add_field(
-        name="🔓 Bypass",
-        value=("`/bypass <url>` — Bypassea un enlace\n"
-               "`/setautobypass` — Toggle auto-bypass en canal *(Admin)*"),
+        name=f"{E_RDIAM} Bypass",
+        value=(f"`/bypass` — Bypassea un enlace\n"
+               f"`/setautobypass` — Auto-bypass en canal *(Admin)*"),
         inline=False)
     e.add_field(
-        name="🔔 Executor Alerts",
-        value="`/set` — Configurar canal y rol de alertas *(Manage Server)*",
+        name=f"{E_CROWN} Fun",
+        value=(f"`/8ball` — Bola mágica\n"
+               f"`/joke` — Chiste aleatorio\n"
+               f"`/coinflip` — Cara o cruz\n"
+               f"`/roll [lados]` — Lanzar dado\n"
+               f"`/roast <user>` — Incinerar a alguien\n"
+               f"`/rps` — Piedra papel tijeras\n"
+               f"`/say <msg>` — Bot dice algo *(Manage Msgs)*"),
         inline=False)
     e.add_field(
-        name="📊 Utilidad",
-        value="`/ping` — Latencia del bot\n`/help` — Esta lista",
+        name=f"{E_ARROW} Utilidad",
+        value="`/ping` — Latencia\n`/help` — Esta lista",
         inline=False)
     e.set_image(url=IMG_MAIN)
-    e.set_footer(text=f"{BOT_NAME} • {BOT_CREDIT}")
+    e.set_footer(text=f"SYSTEM MADE WITH 🔥  |  {_footer()}")
     v = View()
-    v.add_item(Button(label="Soporte",     emoji="💬", url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link))
-    v.add_item(Button(label="Invitar Bot", emoji="🤖", url=BOT_INVITE_URL,     style=discord.ButtonStyle.link))
+    v.add_item(Button(label="SUPPORT SERVER", emoji="💬", url=SUPPORT_SERVER_URL,
+                      style=discord.ButtonStyle.link))
+    v.add_item(Button(label="INVITE ME",      emoji="🤖", url=BOT_INVITE_URL,
+                      style=discord.ButtonStyle.link))
     await interaction.response.send_message(embed=e, view=v)
 
 # ── HEALTH SERVER ─────────────────────────────────────────────────
