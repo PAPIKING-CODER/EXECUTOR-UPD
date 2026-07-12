@@ -39,7 +39,7 @@ SUPPORT_SERVER_URL = os.environ.get("SUPPORT_SERVER_URL", "https://discord.gg/nU
 BOT_INVITE_URL     = os.environ.get("BOT_INVITE_URL",
     "https://discord.com/oauth2/authorize?client_id=1525040833814855710")
 
-BOT_NAME   = "KING BOT"
+BOT_NAME   = "FMD BOT"
 BOT_CREDIT = "BY KING"
 
 BYPASS_API_URL = "https://4pi-bypass.vercel.app/api/bypass?url="
@@ -60,7 +60,7 @@ C_WARN  = 0xFF4500   # rojo-naranja para loading
 C_INFO  = 0x8B0000   # rojo profundo
 
 # ── IMAGEN PRINCIPAL ─────────────────────────────────────────────
-IMG_MAIN = "https://cdn.discordapp.com/attachments/1525427252400099381/1525750876155805847/ezgif-37d313baab956afc.gif?ex=6a5485bb&is=6a53343b&hm=f6df69c459c7bad9ed031d12eee35f42ab4adbb7290fe08a3707046eb3bf7200&"
+IMG_MAIN = "https://cdn.discordapp.com/attachments/1525556800579965058/1525566942281465876/ezgif-35ed139046075f14_1.gif?ex=6a54832e&is=6a5331ae&hm=a4db669a357a86146d47dabf764d2f5c33d1e764a23744408a074c58c4576633&"
 
 # ── EMOJIS ───────────────────────────────────────────────────────
 # Se usan emojis unicode estándar (en vez de emojis personalizados) para que
@@ -211,7 +211,7 @@ def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> disco
     e.set_thumbnail(url=URL_CHECK)
     e.add_field(
         name=f"{E_RDIAM} RESULT",
-        value=f"```\n{result[:900]}\n```",
+        value=f"`\n{result[:900]}\n`",
         inline=False
     )
     e.add_field(
@@ -234,7 +234,7 @@ def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> disc
     e.set_thumbnail(url=URL_NO)
     e.add_field(
         name=f"{E_RDIAM} URL",
-        value=f"```\n{url[:200]}\n```",
+        value=f"`\n{url[:200]}\n`",
         inline=False
     )
     e.add_field(
@@ -276,18 +276,18 @@ class BypassView(View):
             disabled=True, row=0))
         self.add_item(Button(
             label="SUPPORT SERVER", emoji="💬",
-            url=SUPPORT_SERVER_URL,
+            url=https://discord.gg/ZMXmwUjTBf,
             style=discord.ButtonStyle.link, row=0))
         self.add_item(Button(
             label="INVITE ME", emoji="🤖",
-            url=BOT_INVITE_URL,
+            url=https://discord.com/oauth2/authorize?client_id=1525629900038475969,
             style=discord.ButtonStyle.link, row=0))
 
     @discord.ui.button(label="📋  Copiar resultado",
                        style=discord.ButtonStyle.danger, row=1)
     async def copy_btn(self, interaction: discord.Interaction, _):
         await interaction.response.send_message(
-            content=f"```\n{self._r[:1800]}\n```", ephemeral=True)
+            content=f"`\n{self._r[:1800]}\n`", ephemeral=True)
 
 class FailView(View):
     def __init__(self, elapsed: float):
@@ -298,7 +298,7 @@ class FailView(View):
             disabled=True, row=0))
         self.add_item(Button(
             label="SUPPORT SERVER", emoji="💬",
-            url=SUPPORT_SERVER_URL,
+            url=https://discord.gg/ZMXmwUjTBf
             style=discord.ButtonStyle.link, row=0))
 
 # ── BOT ──────────────────────────────────────────────────────────
