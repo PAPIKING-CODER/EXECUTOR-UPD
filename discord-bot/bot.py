@@ -276,7 +276,7 @@ class BypassView(View):
             disabled=True, row=0))
         self.add_item(Button(
             label="SUPPORT SERVER", emoji="💬",
-            url=https://discord.gg/ZMXmwUjTBf,
+            url=
             style=discord.ButtonStyle.link, row=0))
         self.add_item(Button(
             label="INVITE ME", emoji="🤖",
