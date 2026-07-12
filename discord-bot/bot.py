@@ -60,7 +60,7 @@ C_WARN  = 0xFF4500   # rojo-naranja para loading
 C_INFO  = 0x8B0000   # rojo profundo
 
 # ── IMAGEN PRINCIPAL ─────────────────────────────────────────────
-IMG_MAIN = "https://cdn.discordapp.com/attachments/1525427252400099381/1525750876155805847/ezgif-37d313baab956afc.gif?ex=6a5485bb&is=6a53343b&hm=f6df69c459c7bad9ed031d12eee35f42ab4adbb7290fe08a3707046eb3bf7200&"
+IMG_MAIN = "https://cdn.discordapp.com/attachments/1525556800579965058/1525566942281465876/ezgif-35ed139046075f14_1.gif?ex=6a54832e&is=6a5331ae&hm=a4db669a357a86146d47dabf764d2f5c33d1e764a23744408a074c58c4576633&"
 
 # ── EMOJIS ───────────────────────────────────────────────────────
 E_CHECK   = "✅"
@@ -75,12 +75,6 @@ E_USER    = "👤"
 E_TICKET  = "🎫"
 E_LOCK    = "🔒"
 E_INFO    = "📌"
-
-# Emojis personalizados para bypass
-E_BYPASS = "<:bypass:1463164698353733725>"
-E_TIMER  = "<:timer:1525380296852377711>"
-E_RESULT = "<:result:1453846224573566987>"
-E_REQUEST = "<:request:1525787989354086411>"
 
 # URLs de las imágenes para set_thumbnail / set_author
 URL_CHECK  = "https://cdn.discordapp.com/emojis/1511381303872716820.webp?size=100&animated=true"
@@ -145,7 +139,7 @@ def _footer() -> str:
 _KEYS = ("content","result","loadstring","bypassed","bypassed_link",
          "bypassed_url","final_url","destination","url","link","key","output")
 _http = requests.Session()
-_http.headers.update({"User-Agent": "FMD-Bot/1.0"})
+_http.headers.update({"User-Agent": "KingBot/1.0"})
 
 def _extract(data):
     if isinstance(data, dict):
@@ -207,20 +201,20 @@ def _bypass_sync(url: str):
 
 def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> discord.Embed:
     e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"{E_BYPASS} BYPASSED SUCCESSFULLY", icon_url=URL_CHECK)
+    e.set_author(name="BYPASSED SUCCESSFULLY", icon_url=URL_CHECK)
     e.set_thumbnail(url=URL_CHECK)
     e.add_field(
-        name=f"{E_RESULT} RESULT",
+        name=f"{E_RDIAM} RESULT",
         value=f"```\n{result[:900]}\n```",
         inline=False
     )
     e.add_field(
-        name=f"{E_REQUEST} REQUEST BY",
+        name=f"{E_USER} REQUEST BY",
         value=user.mention,
         inline=True
     )
     e.add_field(
-        name=f"{E_TIMER} TIME",
+        name=f"{E_LOAD} TIME",
         value=f"{elapsed:.2f}s",
         inline=True
     )
@@ -230,10 +224,10 @@ def embed_ok(result: str, elapsed: float, url: str, user: discord.User) -> disco
 
 def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> discord.Embed:
     e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"{E_BYPASS} BYPASS FAILED", icon_url=URL_NO)
+    e.set_author(name="BYPASS FAILED", icon_url=URL_NO)
     e.set_thumbnail(url=URL_NO)
     e.add_field(
-        name=f"{E_RESULT} URL",
+        name=f"{E_RDIAM} URL",
         value=f"```\n{url[:200]}\n```",
         inline=False
     )
@@ -243,12 +237,12 @@ def embed_fail(error: str, url: str, elapsed: float, user: discord.User) -> disc
         inline=False
     )
     e.add_field(
-        name=f"{E_REQUEST} REQUEST BY",
+        name=f"{E_USER} REQUEST BY",
         value=user.mention,
         inline=True
     )
     e.add_field(
-        name=f"{E_TIMER} TIME",
+        name=f"{E_LOAD} TIME",
         value=f"{elapsed:.2f}s",
         inline=True
     )
@@ -303,7 +297,7 @@ class FailView(View):
 
 # ── BOT ──────────────────────────────────────────────────────────
 
-class FMDBot(discord.Client):
+class KingBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
         intents.message_content = True
@@ -347,7 +341,7 @@ class FMDBot(discord.Client):
             if urls:
                 asyncio.create_task(_auto_bypass(message, urls))
 
-bot = FMDBot()
+bot = KingBot()
 
 # ── AUTO-BYPASS ───────────────────────────────────────────────────
 
@@ -572,7 +566,7 @@ class TicketPanelView(View):
 
     @discord.ui.button(label="Abrir Ticket", emoji="🎫",
                         style=discord.ButtonStyle.danger,
-                        custom_id="fmd_ticket_open")
+                        custom_id="king_ticket_open")
     async def open_ticket(self, interaction: discord.Interaction, _):
         await _create_ticket(interaction)
 
@@ -582,7 +576,7 @@ class TicketCloseView(View):
 
     @discord.ui.button(label="Cerrar Ticket", emoji="🔒",
                         style=discord.ButtonStyle.secondary,
-                        custom_id="fmd_ticket_close")
+                        custom_id="king_ticket_close")
     async def close_ticket(self, interaction: discord.Interaction, _):
         await _close_ticket(interaction)
 
@@ -806,7 +800,7 @@ class GiveawayView(View):
 
     @discord.ui.button(label="Participar", emoji="🎉",
                         style=discord.ButtonStyle.danger,
-                        custom_id="fmd_giveaway_enter")
+                        custom_id="king_giveaway_enter")
     async def enter(self, interaction: discord.Interaction, _):
         gid = str(interaction.message.id)
         gw = giveaways.get(gid)
