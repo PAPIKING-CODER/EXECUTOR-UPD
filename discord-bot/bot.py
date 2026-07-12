@@ -9,8 +9,9 @@ try:
 except ImportError:
     sys.modules["audioop"] = types.ModuleType("audioop")
 
-import os, re, json, time, asyncio, logging
+import os, re, json, time, asyncio, logging, threading
 from datetime import datetime, timezone
+from http.server import HTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from urllib.parse import quote
 
@@ -18,7 +19,7 @@ import discord
 from discord import app_commands
 from discord.ui import Button, View
 from discord.ext import tasks
-import aiohttp, requests
+import requests
 
 try:
     from dotenv import load_dotenv; load_dotenv()
@@ -249,17 +250,19 @@ class ErrorView(View):
 
 # ── WEAO API ─────────────────────────────────────────────────────────────────
 
-async def fetch_exploits() -> dict:
+def _fetch_exploits_sync() -> dict:
     try:
-        async with aiohttp.ClientSession() as s:
-            async with s.get(WEAO_API, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                if r.status == 200:
-                    raw = await r.json(content_type=None)
-                    lst = raw if isinstance(raw, list) else raw.get("exploits", raw.get("data", []))
-                    return {item.get("name","").lower(): item for item in lst if item.get("name")}
+        resp = _http.get(WEAO_API, timeout=15)
+        if resp.status_code == 200:
+            raw = resp.json()
+            lst = raw if isinstance(raw, list) else raw.get("exploits", raw.get("data", []))
+            return {item.get("name","").lower(): item for item in lst if item.get("name")}
     except Exception as ex:
         logger.warning(f"[WEAO] {ex}")
     return {}
+
+async def fetch_exploits() -> dict:
+    return await asyncio.get_running_loop().run_in_executor(None, _fetch_exploits_sync)
 
 def get_exploit(data: dict, name: str):
     return data.get(name.lower())
@@ -669,20 +672,23 @@ async def cmd_help(interaction: discord.Interaction):
     v.add_item(Button(label="Invitar Bot",url=BOT_INVITE_URL,     style=discord.ButtonStyle.link, emoji="🤖"))
     await interaction.response.send_message(embed=e, view=v)
 
-# ── HEALTH SERVER ─────────────────────────────────────────────────────────────
+# ── HEALTH SERVER (stdlib only, no aiohttp.web) ───────────────────────────────
 
-async def _health(_):
-    return aiohttp.web.Response(
-        text=f'{{"status":"online","bot":"{BOT_NAME}","uptime":"{_uptime()}"}}',
-        content_type="application/json")
+class _HealthHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        body = f'{{"status":"online","bot":"{BOT_NAME}","uptime":"{_uptime()}"}}'.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
-async def start_web():
-    app = aiohttp.web.Application()
-    app.router.add_get("/",       _health)
-    app.router.add_get("/health", _health)
-    runner = aiohttp.web.AppRunner(app)
-    await runner.setup()
-    await aiohttp.web.TCPSite(runner, "0.0.0.0", PORT).start()
+    def log_message(self, *_): pass  # silence access logs
+
+def start_web():
+    server = HTTPServer(("0.0.0.0", PORT), _HealthHandler)
+    t = threading.Thread(target=server.serve_forever, daemon=True)
+    t.start()
     logger.info(f"🌐 Health server :{PORT}")
 
 # ── MAIN ──────────────────────────────────────────────────────────────────────
@@ -691,7 +697,7 @@ async def main():
     if not DISCORD_TOKEN:
         logger.error("❌ DISCORD_TOKEN no encontrado.")
         return
-    await start_web()
+    start_web()
     logger.info(f"🚀 Iniciando {BOT_NAME}...")
     await bot.start(DISCORD_TOKEN)
 
