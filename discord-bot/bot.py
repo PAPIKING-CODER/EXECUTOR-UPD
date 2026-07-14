@@ -10,7 +10,6 @@ except ImportError:
 
 import os, re, json, time, asyncio, logging, threading, random, string, ast, operator, base64, hashlib
 from datetime import datetime, timezone, timedelta
-from collections import deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from urllib.parse import quote
@@ -50,14 +49,10 @@ BOT_CREDIT = "BY KING"
 # Cambialo con la variable de entorno BOT_TRIGGER si quieres otra palabra.
 BOT_TRIGGER = os.environ.get("BOT_TRIGGER", "fmd")
 
-# ── KING API ─────────────────────────────────────────────────────
-# Docs: https://github.com/PAPIKING-CODER/BYPASS-API
-# Response: { success, destination, service, processingTime }
-BYPASS_API_URL     = "https://king-api-25n8.onrender.com/api/bypass?url="
-SUPPORTED_ENDPOINT = "https://king-api-25n8.onrender.com/api/supported"
-BYPASS_TIMEOUT = 30   # segundos máximo por petición
-BYPASS_RETRIES = 3    # reintentos ante error de red
-BYPASS_DELAY   = 3    # segundos entre reintentos
+BYPASS_API_URL = "https://4pi-bypass.vercel.app/api/bypass?url="
+BYPASS_TIMEOUT = 30
+BYPASS_RETRIES = 3
+BYPASS_DELAY   = 3
 
 BYPASS_COOLDOWN = 12          # segundos de espera por usuario entre bypasses
 BYPASS_AUTODELETE = 120       # segundos antes de borrar el mensaje de resultado
@@ -236,25 +231,25 @@ def _t(guild_id: int, key: str, **kwargs) -> str:
     except Exception:
         return text
 
-# ── BYPASS ENGINE ─────────────────────────────────────────────────
-# KING API v4.0.0 — respuesta: { success, destination, service, processingTime }
-# El campo clave es siempre "destination". _extract() queda como fallback genérico.
-
+# ── BYPASS ENGINE ────────────────────────────────────────────────
+_KEYS = ("content","result","loadstring","bypassed","bypassed_link",
+         "bypassed_url","final_url","destination","url","link","key","output")
 _http = requests.Session()
-_http.headers.update({
-    "User-Agent": "FMDBot/2.0",
-    "Accept":     "application/json",
-})
+_http.headers.update({"User-Agent": "FMDBot/1.0"})
 
-def _extract(data: dict) -> str | None:
-    """Extrae la URL resultado de cualquier respuesta JSON (fallback genérico)."""
-    _KEYS = ("destination", "result", "content", "loadstring", "bypassed",
-             "bypassed_link", "bypassed_url", "final_url", "url", "link", "key", "output")
+def _extract(data):
     if isinstance(data, dict):
+        # 1) primero los campos conocidos, pero solo si de verdad son una URL
         for k in _KEYS:
             v = data.get(k)
-            if isinstance(v, str) and v.strip().startswith("http"):
+            if isinstance(v, str) and v.strip().startswith(("http://", "https://")):
                 return v.strip()
+        # 2) si no, cualquier valor string que empiece con http (por si Banana
+        #    usa un nombre de campo que no está en _KEYS)
+        for v in data.values():
+            if isinstance(v, str) and v.strip().startswith(("http://", "https://")):
+                return v.strip()
+        # 3) por último, busca dentro de objetos/listas anidadas
         for v in data.values():
             if isinstance(v, (dict, list)):
                 r = _extract(v)
@@ -265,88 +260,50 @@ def _extract(data: dict) -> str | None:
             if r: return r
     return None
 
-def _bypass_sync(url: str) -> tuple[str | None, str | None]:
-    """
-    Llama a KING API v5.0.0 y devuelve (destination, error).
-
-    Códigos que maneja:
-      200              → éxito, lee campo 'destination'
-      400              → bypass falló, lee campo 'message'  (nunca 422)
-      429              → rate limit, espera Retry-After y reintenta
-      500              → error interno de la API
-      red / timeout    → reintenta hasta BYPASS_RETRIES veces
-    """
+def _bypass_sync(url: str):
     last_err = "Error desconocido"
     for attempt in range(1, BYPASS_RETRIES + 1):
         try:
-            resp = _http.get(
-                BYPASS_API_URL + quote(url, safe=""),
-                timeout=BYPASS_TIMEOUT,
-            )
-            code = resp.status_code
-
-            # ── 429 Rate limit ──────────────────────────────────────────
-            if code == 429:
-                retry_after = int(resp.headers.get("Retry-After", BYPASS_DELAY))
-                logger.warning("KING API 429 — esperando %ds (intento %d)", retry_after, attempt)
-                time.sleep(retry_after)
-                continue  # no cuenta como intento fallido
-
-            # ── Parsear JSON (siempre esperable de KING API v5) ─────────
+            resp = _http.get(BYPASS_API_URL + quote(url, safe=""), timeout=BYPASS_TIMEOUT)
+            if resp.status_code != 200:
+                last_err = f"HTTP {resp.status_code}"
+                if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
+                return None, last_err
             try:
                 data = resp.json()
             except Exception:
                 txt = resp.text.strip()
-                if txt.startswith("http"):
-                    return txt, None
-                last_err = f"Respuesta no-JSON (HTTP {code})"
-                logger.warning("KING API respuesta no-JSON intento %d: %s", attempt, txt[:80])
+                if txt.startswith("http"): return txt, None
+                last_err = "Respuesta inválida"
                 if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
                 return None, last_err
-
-            # ── 200 OK ──────────────────────────────────────────────────
-            if code == 200:
-                if isinstance(data, dict) and data.get("success") is True:
-                    dst = data.get("destination", "")
-                    if dst and dst.startswith("http"):
-                        return dst, None
-                    fallback = _extract(data)
-                    if fallback:
-                        return fallback, None
-                    return None, "API respondió OK pero sin campo 'destination'"
-
-            # ── 400 bypass falló (KING API v5 usa 400, no 422) ─────────
-            if code in (400, 422):
-                msg = ""
-                if isinstance(data, dict):
-                    msg = data.get("message") or data.get("error") or ""
-                last_err = msg or f"Bypass fallido (HTTP {code})"
-                logger.info("KING API %d: %s", code, last_err)
-                # No reintentar — el bypass ya se procesó y falló
-                return None, last_err
-
-            # ── 500 error interno ───────────────────────────────────────
-            if code == 500:
-                last_err = "Error interno de KING API (500)"
-                logger.error("KING API 500 intento %d — %s", attempt, url[:60])
+            api_err = isinstance(data, dict) and (
+                data.get("success") is False or data.get("error")
+                or str(data.get("status","")).lower() == "error")
+            result = _extract(data)
+            if result and not api_err:
+                return result, None
+            # Algo no cuadró: lo dejamos registrado para poder ver en los logs
+            # (Render → Logs) qué devolvió realmente la API y así detectar si
+            # cambió el nombre del campo o el formato de la respuesta.
+            try:
+                logger.info(f"Banana API sin resultado válido — respuesta cruda: {json.dumps(data)[:500]}")
+            except Exception:
+                pass
+            if api_err:
+                msg = (data.get("message") or data.get("error")) if isinstance(data, dict) else None
+                last_err = str(msg or "Sin resultado")
                 if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
                 return None, last_err
-
-            # ── Otro código inesperado ─────────────────────────────────
-            last_err = f"HTTP {code} inesperado"
-            logger.warning("KING API código inesperado %d intento %d", code, attempt)
+            last_err = "No se encontró una URL válida en la respuesta de la API"
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
             return None, last_err
-
         except requests.exceptions.Timeout:
             last_err = f"Timeout ({BYPASS_TIMEOUT}s)"
-            logger.warning("KING API timeout intento %d: %s", attempt, url[:60])
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
         except Exception as ex:
-            last_err = str(ex)[:120]
-            logger.warning("_bypass_sync excepción intento %d: %s", attempt, last_err)
+            last_err = str(ex)[:100]
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
-
     return None, last_err
 
 # ── BYPASS EMBEDS  (diseño foto 2, tema rojo) ─────────────────────
@@ -693,45 +650,23 @@ async def _ae(i, e):
         await i.response.send_message(
             f"{E_WARN} Necesitas **Administrador**.", ephemeral=True)
 
+_KNOWN_SUPPORTED_SERVICES = (
+    "Linkvertise", "Lootlabs", "Lootdest", "ouo.io", "adf.ly", "Sub2unlock",
+    "Sub2get", "Work.ink", "Rekonise", "Boost.ink", "Social Unlock",
+    "Mboost.me", "Shrinkme", "Shrinkearn", "GyaniLinks", "AdFoc.us",
+    "Exe.io", "LinkPays", "Zagumi", "Loot-links",
+)
+
 @bot.tree.command(name="supported", description="📋 Lista de servicios soportados para bypass")
 async def cmd_supported(interaction: discord.Interaction):
-    await interaction.response.defer()
-    loop = asyncio.get_running_loop()
-    try:
-        resp = await loop.run_in_executor(None, lambda: _http.get(SUPPORTED_ENDPOINT, timeout=15))
-        data = resp.json()
-        # KING API devuelve: {"success": true, "services": [{name, domains, category, engine, status}, ...]}
-        raw = data.get("services") or data.get("supported") or (data if isinstance(data, list) else [])
-        # Normalizar: puede ser lista de objetos (KING API) o lista de strings (APIs antiguas)
-        services = []
-        for s in raw:
-            if isinstance(s, dict):
-                name = s.get("name", "?")
-                domains = s.get("domains") or []
-                cat = s.get("category", "")
-                dom_str = f" — `{', '.join(domains[:3])}{'...' if len(domains) > 3 else ''}`" if domains else ""
-                services.append(f"**{name}**{dom_str}" + (f" _{cat}_" if cat else ""))
-            else:
-                services.append(str(s))
-        total = data.get("total", len(services)) if isinstance(data, dict) else len(services)
-    except Exception as ex:
-        logger.warning(f"/supported: {ex}")
-        return await interaction.followup.send(
-            f"{E_WARN} No pude obtener la lista de servicios soportados ahora mismo.")
-
     e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"{BOT_NAME} — 📋 Servicios soportados (KING API)", icon_url=URL_CROWN)
-    if services:
-        lista = "\n".join(f"{E_RDIAM} {s}" for s in services[:25])
-        e.description = f"**Total:** {total} servicios\n\n{lista}"
-        if len(services) > 25:
-            e.set_footer(text=f"Y {len(services) - 25} más...  •  {_footer()}", icon_url=URL_REDPT)
-        else:
-            e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    else:
-        e.description = f"{E_WARN} No se pudo leer la lista de servicios."
-        e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.followup.send(embed=e)
+    e.set_author(name=f"{BOT_NAME} — 📋 Servicios soportados", icon_url=URL_CROWN)
+    lista = "\n".join(f"• {s}" for s in _KNOWN_SUPPORTED_SERVICES)
+    e.description = (f"{BYPASS_API_URL.split('/api/')[0]} soporta más de 100 servicios de "
+                     f"acortadores/key-systems, entre ellos:\n\n{lista}\n\n"
+                     f"{E_INFO} Si tu enlace no es de estos, prueba igual con `/bypass` — "
+                     f"probablemente también funcione, esta es solo una lista de ejemplo.")
+    await interaction.response.send_message(embed=e)
 
 # ── SLASH — FUN ───────────────────────────────────────────────────
 
@@ -1406,35 +1341,87 @@ class GiveawayDraftView(View):
         await interaction.response.send_modal(GiveawayCustomizeModal(self.draft))
 
 
-@bot.tree.command(name="giveaway-start", description="Inicia un giveaway 🎉")
-@app_commands.describe(premio="Qué se sortea", duracion="Ej: 30s, 10m, 2h, 1d",
-                        ganadores="Cantidad de ganadores (por defecto 1)",
-                        canal="Canal donde publicarlo (por defecto el actual)")
+class GiveawayCoreModal(discord.ui.Modal, title="🎉 Datos del giveaway"):
+    premio = discord.ui.TextInput(label="Premio", max_length=200, placeholder="Ej: Nitro Boost x1")
+    duracion = discord.ui.TextInput(label="Duración (ej: 30s, 10m, 2h, 1d)", max_length=10, placeholder="1h")
+    ganadores = discord.ui.TextInput(label="Cantidad de ganadores", max_length=3, default="1", required=False)
+
+    def __init__(self, channel: discord.TextChannel, host_id: int, guild_id: int):
+        super().__init__()
+        self.channel = channel
+        self.host_id = host_id
+        self.guild_id = guild_id
+
+    async def on_submit(self, interaction: discord.Interaction):
+        secs = _parse_duration(self.duracion.value)
+        if not secs:
+            return await interaction.response.send_message(
+                f"{E_WARN} Duración inválida. Usa formato como `30s`, `10m`, `2h`, `1d`.", ephemeral=True)
+        try:
+            ganadores = max(1, min(20, int(self.ganadores.value or "1")))
+        except ValueError:
+            ganadores = 1
+
+        draft = {
+            "prize": self.premio.value, "secs": secs, "winners": ganadores,
+            "channel": self.channel, "host_id": self.host_id, "guild_id": self.guild_id,
+        }
+        e = discord.Embed(color=C_RED)
+        e.set_author(name=f"{BOT_NAME} — 🎉 Vista previa del giveaway", icon_url=URL_CROWN)
+        e.description = (f"{E_RDIAM} **Premio:** {self.premio.value}\n"
+                         f"{E_CROWN} **Ganadores:** {ganadores}\n"
+                         f"{E_ARROW} **Duración:** {self.duracion.value}\n"
+                         f"📢 **Canal:** {self.channel.mention}\n\n"
+                         f"¿Lo publico tal cual, o quieres agregarle imagen, miniatura, "
+                         f"título o descripción extra primero?")
+        e.set_footer(text=_footer(), icon_url=URL_REDPT)
+        await interaction.response.send_message(embed=e, view=GiveawayDraftView(draft), ephemeral=True)
+
+
+class GiveawayChannelSelect(discord.ui.ChannelSelect):
+    def __init__(self, default_channel: discord.TextChannel):
+        super().__init__(placeholder=f"Canal: #{default_channel.name} (por defecto)",
+                         channel_types=[discord.ChannelType.text], min_values=1, max_values=1)
+        self.chosen = default_channel
+
+    async def callback(self, interaction: discord.Interaction):
+        self.chosen = self.values[0]
+        await interaction.response.send_message(
+            f"{E_CHECK} Canal elegido: {self.chosen.mention}. Ahora pulsa **📝 Configurar giveaway**.",
+            ephemeral=True)
+
+class GiveawayStartView(View):
+    """Primer paso de /giveaway-start: elegir canal (opcional) y abrir el
+    formulario con los datos del giveaway. Ningún dato se pide como opción
+    del comando — todo se configura aquí."""
+    def __init__(self, host_id: int, guild_id: int, default_channel: discord.TextChannel):
+        super().__init__(timeout=180)
+        self.host_id = host_id
+        self.guild_id = guild_id
+        self.select = GiveawayChannelSelect(default_channel)
+        self.add_item(self.select)
+
+    @discord.ui.button(label="📝 Configurar giveaway", style=discord.ButtonStyle.danger, row=1)
+    async def configure(self, interaction: discord.Interaction, _):
+        if interaction.user.id != self.host_id:
+            return await interaction.response.send_message(f"{E_WARN} Solo quien ejecutó el comando puede configurarlo.", ephemeral=True)
+        await interaction.response.send_modal(
+            GiveawayCoreModal(self.select.chosen, self.host_id, self.guild_id))
+
+
+@bot.tree.command(name="giveaway-start", description="Inicia un giveaway 🎉 (todo se configura en un panel, sin opciones)")
 @app_commands.checks.has_permissions(manage_guild=True)
-async def cmd_giveaway_start(interaction: discord.Interaction, premio: str, duracion: str,
-                              ganadores: app_commands.Range[int, 1, 20] = 1,
-                              canal: discord.TextChannel = None):
-    secs = _parse_duration(duracion)
-    if not secs:
-        return await interaction.response.send_message(
-            f"{E_WARN} Duración inválida. Usa formato como `30s`, `10m`, `2h`, `1d`.", ephemeral=True)
-    target = canal or interaction.channel
-
-    draft = {
-        "prize": premio, "secs": secs, "winners": ganadores,
-        "channel": target, "host_id": interaction.user.id, "guild_id": interaction.guild_id,
-    }
-
+async def cmd_giveaway_start(interaction: discord.Interaction):
     e = discord.Embed(color=C_RED)
-    e.set_author(name=f"{BOT_NAME} — 🎉 Vista previa del giveaway", icon_url=URL_CROWN)
-    e.description = (f"{E_RDIAM} **Premio:** {premio}\n"
-                     f"{E_CROWN} **Ganadores:** {ganadores}\n"
-                     f"{E_ARROW} **Duración:** {duracion}\n"
-                     f"📢 **Canal:** {target.mention}\n\n"
-                     f"¿Lo publico tal cual, o quieres agregarle imagen, miniatura, "
-                     f"título o descripción extra primero?")
+    e.set_author(name=f"{BOT_NAME} — 🎉 Nuevo giveaway", icon_url=URL_CROWN)
+    e.description = (f"{E_ARROW} Elige el canal (opcional, por defecto {interaction.channel.mention}) "
+                     f"y luego pulsa **📝 Configurar giveaway** para poner premio, duración, "
+                     f"ganadores, imagen, título y descripción.")
     e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e, view=GiveawayDraftView(draft), ephemeral=True)
+    await interaction.response.send_message(
+        embed=e,
+        view=GiveawayStartView(interaction.user.id, interaction.guild_id, interaction.channel),
+        ephemeral=True)
 
 @cmd_giveaway_start.error
 async def _gw_start_err(i, e):
@@ -1511,6 +1498,27 @@ async def cmd_giveaway_list(interaction: discord.Interaction):
     e = discord.Embed(description="\n".join(lines), color=C_RED)
     e.set_author(name=f"{BOT_NAME} — 🎉 Giveaways activos", icon_url=URL_CROWN)
     e.set_footer(text=_footer(), icon_url=URL_REDPT)
+    await interaction.response.send_message(embed=e, ephemeral=True)
+
+@bot.tree.command(name="giveaway-info", description="Ver los detalles de un giveaway por su ID")
+@app_commands.describe(id="ID corto del giveaway (ej: 3) o el ID del mensaje")
+async def cmd_giveaway_info(interaction: discord.Interaction, id: str):
+    mid, gw = _find_giveaway(interaction.guild_id, id)
+    if not gw:
+        return await interaction.response.send_message(f"{E_WARN} No encontré ese giveaway.", ephemeral=True)
+    estado = "🔒 Finalizado" if gw.get("ended") else "🟢 Activo"
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 🎉 Giveaway #{gw['short_id']}", icon_url=URL_CROWN)
+    e.add_field(name="Estado", value=estado, inline=True)
+    e.add_field(name="Premio", value=gw["prize"], inline=True)
+    e.add_field(name="Ganadores", value=str(gw["winners"]), inline=True)
+    e.add_field(name="Organiza", value=f"<@{gw['host_id']}>", inline=True)
+    e.add_field(name="Canal", value=f"<#{gw['channel_id']}>", inline=True)
+    e.add_field(name="Participantes", value=str(len(gw.get("entries", []))), inline=True)
+    e.add_field(name="Termina" if not gw.get("ended") else "Terminó",
+               value=f"<t:{int(gw['end_ts'])}:R>", inline=False)
+    if gw.get("title_override"): e.add_field(name="Título personalizado", value=gw["title_override"], inline=False)
+    e.set_footer(text=f"ID de mensaje: {mid}  •  {_footer()}", icon_url=URL_REDPT)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 
@@ -2016,6 +2024,22 @@ async def cmd_add_money(interaction: discord.Interaction, usuario: discord.Membe
 
 @cmd_add_money.error
 async def _add_money_err(i, e):
+    if isinstance(e, app_commands.MissingPermissions):
+        await i.response.send_message(f"{E_WARN} Necesitas **Administrador**.", ephemeral=True)
+
+@bot.tree.command(name="economy-reset", description="Reinicia el saldo de un usuario a 0 (Admin)")
+@app_commands.describe(usuario="Usuario a reiniciar")
+@app_commands.checks.has_permissions(administrator=True)
+async def cmd_economy_reset(interaction: discord.Interaction, usuario: discord.Member):
+    w = _get_wallet(interaction.guild_id, usuario.id)
+    w["balance"] = 0
+    _save_eco()
+    e = discord.Embed(description=f"{E_CHECK} Saldo de {usuario.mention} reiniciado a `0` {CURRENCY}", color=C_RED)
+    e.set_footer(text=_footer(), icon_url=URL_REDPT)
+    await interaction.response.send_message(embed=e)
+
+@cmd_economy_reset.error
+async def _economy_reset_err(i, e):
     if isinstance(e, app_commands.MissingPermissions):
         await i.response.send_message(f"{E_WARN} Necesitas **Administrador**.", ephemeral=True)
 
@@ -2657,6 +2681,30 @@ async def cmd_botinfo(interaction: discord.Interaction):
     e.set_footer(text=_footer(), icon_url=URL_REDPT)
     await interaction.response.send_message(embed=e)
 
+@bot.tree.command(name="uptime", description="Ver cuánto tiempo lleva el bot conectado")
+async def cmd_uptime(interaction: discord.Interaction):
+    e = discord.Embed(description=f"{E_LOAD} Llevo despierto: **{_uptime()}**", color=C_RED)
+    e.set_footer(text=_footer(), icon_url=URL_REDPT)
+    await interaction.response.send_message(embed=e)
+
+@bot.tree.command(name="stats", description="Estadísticas generales del bot")
+async def cmd_stats(interaction: discord.Interaction):
+    total_users = sum(g.member_count or 0 for g in bot.guilds)
+    active_gw = sum(1 for g in giveaways.values() if not g.get("ended"))
+    open_tk = sum(1 for c in bot.get_all_channels()
+                  if isinstance(c, discord.TextChannel) and c.topic and c.topic.startswith("ticket-owner:"))
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 📊 Estadísticas", icon_url=URL_CROWN)
+    e.add_field(name="Servidores", value=f"`{len(bot.guilds)}`", inline=True)
+    e.add_field(name="Usuarios totales", value=f"`{total_users}`", inline=True)
+    e.add_field(name="Latencia", value=f"`{round(bot.latency*1000)}ms`", inline=True)
+    e.add_field(name="Uptime", value=f"`{_uptime()}`", inline=True)
+    e.add_field(name="Giveaways activos", value=f"`{active_gw}`", inline=True)
+    e.add_field(name="Tickets abiertos", value=f"`{open_tk}`", inline=True)
+    e.add_field(name="Comandos slash", value=f"`{len(bot.tree.get_commands())}`", inline=True)
+    e.set_footer(text=_footer(), icon_url=URL_REDPT)
+    await interaction.response.send_message(embed=e)
+
 # ── GESTIÓN DE SERVIDOR ──────────────────────────────────────────────
 
 @bot.tree.command(name="lock", description="Bloquea el canal actual (Manage Channels)")
@@ -3291,8 +3339,9 @@ async def cmd_help(interaction: discord.Interaction):
         inline=True)
     e.add_field(
         name="🎉 Giveaways",
-        value="`/giveaway-start` (deja personalizar imagen/miniatura/título antes de publicar) "
-              "`/giveaway-end` `/giveaway-reroll` `/giveaway-cancel` `/giveaway-list` *(Manage Server)*",
+        value="`/giveaway-start` (sin opciones — todo se configura en un panel/formulario) "
+              "`/giveaway-info` `/giveaway-end` `/giveaway-reroll` `/giveaway-cancel` `/giveaway-list` "
+              "*(Manage Server)*",
         inline=True)
     e.add_field(
         name="🛡️ Moderación",
@@ -3314,7 +3363,7 @@ async def cmd_help(interaction: discord.Interaction):
         inline=True)
     e.add_field(
         name=f"{CURRENCY} Economía",
-        value="`/balance` `/daily` `/work` `/pay` `/eco-leaderboard` `/add-money` *(Admin)*",
+        value="`/balance` `/daily` `/work` `/pay` `/eco-leaderboard` `/add-money` `/economy-reset` *(Admin)*",
         inline=True)
     e.add_field(
         name="🖼️ Imágenes",
@@ -3340,7 +3389,7 @@ async def cmd_help(interaction: discord.Interaction):
         inline=True)
     e.add_field(
         name=f"{E_ARROW} Utilidad",
-        value="`/ping` `/avatar` `/userinfo` `/serverinfo` `/membercount` `/botinfo` "
+        value="`/ping` `/avatar` `/userinfo` `/serverinfo` `/membercount` `/botinfo` `/uptime` `/stats` "
               "`/language` *(Admin)* `/help`",
         inline=True)
     e.set_image(url=IMG_MAIN)
