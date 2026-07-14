@@ -254,8 +254,9 @@ def _t(guild_id: int, key: str, **kwargs) -> str:
         return text
 
 # ── BYPASS ENGINE ────────────────────────────────────────────────
-_KEYS = ("content","result","loadstring","bypassed","bypassed_link",
-         "bypassed_url","final_url","destination","url","link","key","output")
+# KING API devuelve "destination"; el resto son fallbacks para APIs antiguas
+_KEYS = ("destination","result","content","loadstring","bypassed","bypassed_link",
+         "bypassed_url","final_url","url","link","key","output")
 _http = requests.Session()
 _http.headers.update({"User-Agent": "FMDBot/1.0"})
 
@@ -665,21 +666,34 @@ async def cmd_supported(interaction: discord.Interaction):
     await interaction.response.defer()
     loop = asyncio.get_running_loop()
     try:
-        resp = await loop.run_in_executor(None, lambda: _http.get(SUPPORTED_ENDPOINT, timeout=10))
+        resp = await loop.run_in_executor(None, lambda: _http.get(SUPPORTED_ENDPOINT, timeout=15))
         data = resp.json()
-        services = data.get("services") or data.get("supported") or (data if isinstance(data, list) else [])
+        # KING API devuelve: {"success": true, "services": [{name, domains, category, engine, status}, ...]}
+        raw = data.get("services") or data.get("supported") or (data if isinstance(data, list) else [])
+        # Normalizar: puede ser lista de objetos (KING API) o lista de strings (APIs antiguas)
+        services = []
+        for s in raw:
+            if isinstance(s, dict):
+                name = s.get("name", "?")
+                domains = s.get("domains") or []
+                cat = s.get("category", "")
+                dom_str = f" — `{', '.join(domains[:3])}{'...' if len(domains) > 3 else ''}`" if domains else ""
+                services.append(f"**{name}**{dom_str}" + (f" _{cat}_" if cat else ""))
+            else:
+                services.append(str(s))
+        total = data.get("total", len(services)) if isinstance(data, dict) else len(services)
     except Exception as ex:
         logger.warning(f"/supported: {ex}")
         return await interaction.followup.send(
             f"{E_WARN} No pude obtener la lista de servicios soportados ahora mismo.")
 
     e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"{BOT_NAME} — 📋 Servicios soportados", icon_url=URL_CROWN)
+    e.set_author(name=f"{BOT_NAME} — 📋 Servicios soportados (KING API)", icon_url=URL_CROWN)
     if services:
-        lista = "\n".join(f"• {s}" for s in services[:30])
-        e.description = f"**Total:** {len(services)}\n\n{lista}"
-        if len(services) > 30:
-            e.set_footer(text=f"Y {len(services) - 30} más...  •  {_footer()}", icon_url=URL_REDPT)
+        lista = "\n".join(f"{E_RDIAM} {s}" for s in services[:25])
+        e.description = f"**Total:** {total} servicios\n\n{lista}"
+        if len(services) > 25:
+            e.set_footer(text=f"Y {len(services) - 25} más...  •  {_footer()}", icon_url=URL_REDPT)
         else:
             e.set_footer(text=_footer(), icon_url=URL_REDPT)
     else:
