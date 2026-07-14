@@ -1,4 +1,3 @@
-"""
 FMD BOT — Bypass + Fun Commands
 """
 import sys, types
@@ -45,8 +44,6 @@ BOT_INVITE_URL     = os.environ.get("BOT_INVITE_URL",
 
 BOT_NAME   = "FMD BOT"
 BOT_CREDIT = "BY KING"
-# Palabra que activa los comandos por texto, ej: "fmd afk", "fmd ping".
-# Cambialo con la variable de entorno BOT_TRIGGER si quieres otra palabra.
 BOT_TRIGGER = os.environ.get("BOT_TRIGGER", "fmd")
 
 BYPASS_API_URL = "https://4pi-bypass.vercel.app/api/bypass?url="
@@ -54,9 +51,9 @@ BYPASS_TIMEOUT = 30
 BYPASS_RETRIES = 3
 BYPASS_DELAY   = 3
 
-BYPASS_COOLDOWN = 12          # segundos de espera por usuario entre bypasses
-BYPASS_AUTODELETE = 120       # segundos antes de borrar el mensaje de resultado
-_bypass_cooldowns: dict = {}  # user_id -> timestamp del último bypass
+BYPASS_COOLDOWN = 12
+BYPASS_AUTODELETE = 120
+_bypass_cooldowns: dict = {}
 
 AUTOBYPASS_FILE = "autobypass_channels.json"
 
@@ -65,31 +62,27 @@ TICKET_CONFIG_FILE = "ticket_config.json"
 TICKET_COUNTER_FILE = "ticket_counter.json"
 
 # ── COLORES ──────────────────────────────────────────────────────
-C_RED   = 0xC80000   # rojo oscuro principal
-C_DARK  = 0x1A0000   # casi negro con tono rojo
-C_WARN  = 0xFF4500   # rojo-naranja para loading
-C_INFO  = 0x8B0000   # rojo profundo
+C_RED   = 0xC80000
+C_DARK  = 0x1A0000
+C_WARN  = 0xFF4500
+C_INFO  = 0x8B0000
 
 # ── IMAGEN PRINCIPAL ─────────────────────────────────────────────
 IMG_MAIN = "https://cdn.discordapp.com/attachments/1525428259905474611/1525791324639334430/ezgif-35ed139046075f14.gif?ex=6a555427&is=6a5402a7&hm=9566554493415b9ad921e2200494a35e924ba3f1efa0543e39b5e4d357f73baa&"
 
 # ── EMOJIS ───────────────────────────────────────────────────────
-# Se usan emojis unicode estándar (en vez de emojis personalizados) para que
-# siempre se vean bien, sin importar si el bot tiene el permiso "Usar emojis
-# externos" en el servidor. Antes, cuando el permiso faltaba, Discord mostraba
-# el texto crudo del emoji (por eso aparecía ":_:").
-E_CHECK   = "✅"   # check mark
-E_REDPT   = "🔴"   # red point
-E_WARN    = "⚠️"   # warning
-E_RDIAM   = "💎"   # red diamond
-E_ARROW   = "➡️"   # arrow
-E_CROWN   = "👑"   # red crown
-E_NO      = "❌"   # no
-E_LOAD    = "⏳"   # load
-E_USER    = "👤"   # persona
-E_TICKET  = "🎫"   # ticket
-E_LOCK    = "🔒"   # lock
-E_INFO    = "📌"   # info
+E_CHECK   = "✅"
+E_REDPT   = "🔴"
+E_WARN    = "⚠️"
+E_RDIAM   = "💎"
+E_ARROW   = "➡️"
+E_CROWN   = "👑"
+E_NO      = "❌"
+E_LOAD    = "⏳"
+E_USER    = "👤"
+E_TICKET  = "🎫"
+E_LOCK    = "🔒"
+E_INFO    = "📌"
 
 # URLs de las imágenes para set_thumbnail / set_author
 URL_CHECK  = "https://cdn.discordapp.com/emojis/1511381303872716820.webp?size=100&animated=true"
@@ -122,15 +115,13 @@ def save_json(path, data):
 autobypass_channels: set = set(load_json(AUTOBYPASS_FILE, []))
 def _save_ab(): save_json(AUTOBYPASS_FILE, list(autobypass_channels))
 
-# ticket_config: { "<guild_id>": {"category": id, "support_role": id, "log_channel": id} }
 ticket_config: dict = load_json(TICKET_CONFIG_FILE, {})
 def _save_tc(): save_json(TICKET_CONFIG_FILE, ticket_config)
 
-# ticket_counter: { "<guild_id>": int }
 ticket_counter: dict = load_json(TICKET_COUNTER_FILE, {})
 def _save_tcounter(): save_json(TICKET_COUNTER_FILE, ticket_counter)
 
-_ticket_cooldowns: dict = {}   # user_id -> timestamp del último ticket abierto
+_ticket_cooldowns: dict = {}
 
 def _next_ticket_number(guild_id: int) -> int:
     key = str(guild_id)
@@ -155,12 +146,6 @@ def _footer() -> str:
     return f"{BOT_NAME} • {BOT_CREDIT}"
 
 # ── IDIOMAS (i18n) ───────────────────────────────────────────────
-# El bot soporta español (por defecto) e inglés. Cada servidor puede elegir
-# su idioma con /language. Los textos "vivos" del bot (bypass, tickets,
-# giveaways, verificación, help, avisos de permisos/cooldown) usan esta
-# tabla; los nombres/descripciones de los comandos slash quedan en español
-# porque Discord requiere un sistema de localización aparte para eso
-# (no cubierto en esta pasada — se puede agregar después si lo necesitas).
 LANG = {
     "es": {
         "bypass_processing": "PROCESSING BYPASS...",
@@ -239,17 +224,13 @@ _http.headers.update({"User-Agent": "FMDBot/1.0"})
 
 def _extract(data):
     if isinstance(data, dict):
-        # 1) primero los campos conocidos, pero solo si de verdad son una URL
         for k in _KEYS:
             v = data.get(k)
             if isinstance(v, str) and v.strip().startswith(("http://", "https://")):
                 return v.strip()
-        # 2) si no, cualquier valor string que empiece con http (por si Banana
-        #    usa un nombre de campo que no está en _KEYS)
         for v in data.values():
             if isinstance(v, str) and v.strip().startswith(("http://", "https://")):
                 return v.strip()
-        # 3) por último, busca dentro de objetos/listas anidadas
         for v in data.values():
             if isinstance(v, (dict, list)):
                 r = _extract(v)
@@ -265,45 +246,74 @@ def _bypass_sync(url: str):
     for attempt in range(1, BYPASS_RETRIES + 1):
         try:
             resp = _http.get(BYPASS_API_URL + quote(url, safe=""), timeout=BYPASS_TIMEOUT)
-            if resp.status_code != 200:
-                last_err = f"HTTP {resp.status_code}"
-                if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
-                return None, last_err
+            # Intentar parsear JSON siempre (incluso si no es 200)
+            data = None
             try:
                 data = resp.json()
             except Exception:
-                txt = resp.text.strip()
-                if txt.startswith("http"): return txt, None
-                last_err = "Respuesta inválida"
-                if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
+                pass
+
+            if resp.status_code != 200:
+                error_msg = None
+                if isinstance(data, dict):
+                    error_msg = data.get("message") or data.get("error") or data.get("detail")
+                if not error_msg:
+                    error_msg = f"HTTP {resp.status_code}"
+                last_err = error_msg
+                if attempt < BYPASS_RETRIES:
+                    time.sleep(BYPASS_DELAY)
+                    continue
                 return None, last_err
-            api_err = isinstance(data, dict) and (
-                data.get("success") is False or data.get("error")
-                or str(data.get("status","")).lower() == "error")
+
+            if data is None:
+                txt = resp.text.strip()
+                if txt.startswith("http"):
+                    return txt, None
+                last_err = "Respuesta inválida"
+                if attempt < BYPASS_RETRIES:
+                    time.sleep(BYPASS_DELAY)
+                    continue
+                return None, last_err
+
+            api_err = False
+            if isinstance(data, dict):
+                status_val = str(data.get("status", "")).lower()
+                if data.get("success") is False or data.get("error") or status_val == "error":
+                    api_err = True
+
             result = _extract(data)
             if result and not api_err:
                 return result, None
-            # Algo no cuadró: lo dejamos registrado para poder ver en los logs
-            # (Render → Logs) qué devolvió realmente la API y así detectar si
-            # cambió el nombre del campo o el formato de la respuesta.
-            try:
-                logger.info(f"Banana API sin resultado válido — respuesta cruda: {json.dumps(data)[:500]}")
-            except Exception:
-                pass
+
             if api_err:
                 msg = (data.get("message") or data.get("error")) if isinstance(data, dict) else None
                 last_err = str(msg or "Sin resultado")
-                if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
+                if attempt < BYPASS_RETRIES:
+                    time.sleep(BYPASS_DELAY)
+                    continue
                 return None, last_err
-            last_err = "No se encontró una URL válida en la respuesta de la API"
-            if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
-            return None, last_err
+
+            if not result:
+                # Si success es True pero no hay resultado, buscar cualquier valor que sea URL
+                if isinstance(data, dict) and data.get("success") is True:
+                    for v in data.values():
+                        if isinstance(v, str) and v.startswith(("http://", "https://")):
+                            return v, None
+                last_err = "No se encontró una URL válida en la respuesta de la API"
+                if attempt < BYPASS_RETRIES:
+                    time.sleep(BYPASS_DELAY)
+                    continue
+                return None, last_err
+
+            return None, "Sin resultado"
         except requests.exceptions.Timeout:
             last_err = f"Timeout ({BYPASS_TIMEOUT}s)"
-            if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
+            if attempt < BYPASS_RETRIES:
+                time.sleep(BYPASS_DELAY)
         except Exception as ex:
             last_err = str(ex)[:100]
-            if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
+            if attempt < BYPASS_RETRIES:
+                time.sleep(BYPASS_DELAY)
     return None, last_err
 
 # ── BYPASS EMBEDS  (diseño foto 2, tema rojo) ─────────────────────
@@ -443,9 +453,6 @@ class FailView(View):
 # ── BOT ──────────────────────────────────────────────────────────
 
 def _get_prefix(_bot, message: discord.Message):
-    """Permite activar comandos escribiendo el nombre/trigger del bot,
-    ej: 'fmd afk', 'fmd ping', 'FMD BOT help', o con el prefijo clásico '!',
-    ej: '!afk', '!ping'. También responde a mención directa (@FMD BOT comando)."""
     content = message.content or ""
     low = content.lower()
     prefixes = ["!"]
@@ -502,13 +509,10 @@ class KingBot(commands.Bot):
             if urls:
                 asyncio.create_task(_auto_bypass(message, urls))
 
-        # ── AUTOMOD (palabras prohibidas) ──
         await _check_automod(message)
 
-        # ── XP / NIVELES ──
         await _grant_xp(message)
 
-        # necesario para que funcionen los comandos por prefijo/nombre del bot
         await self.process_commands(message)
 
     async def on_member_join(self, member: discord.Member):
@@ -589,7 +593,6 @@ async def cmd_bypass(interaction: discord.Interaction, url: str):
         e.set_footer(text=_footer(), icon_url=URL_REDPT)
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
-    # ── cooldown por usuario (evita spam) ──
     now = time.time()
     last = _bypass_cooldowns.get(interaction.user.id, 0)
     remaining = BYPASS_COOLDOWN - (now - last)
@@ -614,7 +617,6 @@ async def cmd_bypass(interaction: discord.Interaction, url: str):
             embed=embed_fail(error, url, elapsed, interaction.user, gid),
             view=FailView(elapsed, url))
 
-    # ── auto-borrado a los 120s para no llenar el canal ──
     async def _autodelete():
         await asyncio.sleep(BYPASS_AUTODELETE)
         try:
@@ -819,8 +821,6 @@ _TICKET_REASONS = [
 ]
 
 class TicketPanelView(View):
-    """Vista persistente con el botón para abrir un ticket. custom_id fijo
-    para que siga funcionando tras reiniciar el bot."""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -855,7 +855,6 @@ class TicketReasonView(View):
         self.add_item(TicketReasonSelect())
 
 class TicketCloseView(View):
-    """Vista persistente dentro de cada ticket, con botones de reclamar y cierre."""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -903,7 +902,6 @@ async def _create_ticket(interaction: discord.Interaction, reason: str = "Soport
             color=C_RED)
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
-    # Evita que un usuario tenga varios tickets abiertos a la vez
     existing = discord.utils.get(category.text_channels,
                                   topic=f"ticket-owner:{interaction.user.id}")
     if existing:
@@ -912,7 +910,6 @@ async def _create_ticket(interaction: discord.Interaction, reason: str = "Soport
             color=C_RED)
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
-    # Cooldown anti-spam: no abrir más de 1 ticket cada 60s por usuario
     now = time.time()
     last = _ticket_cooldowns.get(interaction.user.id, 0)
     if now - last < 60:
@@ -1098,12 +1095,9 @@ async def cmd_ticket_close(interaction: discord.Interaction):
 
 GIVEAWAYS_FILE = "giveaways.json"
 GIVEAWAY_COUNTER_FILE = "giveaway_counter.json"
-# giveaways: { "<message_id>": {channel_id, guild_id, prize, winners, end_ts,
-#                                host_id, entries:[ids], ended: bool, short_id: int} }
 giveaways: dict = load_json(GIVEAWAYS_FILE, {})
 def _save_gw(): save_json(GIVEAWAYS_FILE, giveaways)
 
-# giveaway_counter: { "guild_id": último_id_usado }
 giveaway_counter: dict = load_json(GIVEAWAY_COUNTER_FILE, {})
 def _save_gwcounter(): save_json(GIVEAWAY_COUNTER_FILE, giveaway_counter)
 
@@ -1115,8 +1109,6 @@ def _next_giveaway_id(guild_id: int) -> int:
     return n
 
 def _find_giveaway(guild_id: int, ref: str):
-    """Busca un giveaway por su ID corto (1, 2, 3...) o por el ID del mensaje.
-    Devuelve (message_id, data) o (None, None)."""
     ref = ref.strip().lstrip("#")
     gw = giveaways.get(ref)
     if gw and gw.get("guild_id") == guild_id:
@@ -1161,8 +1153,6 @@ def embed_giveaway(short_id: int, prize: str, winners: int, end_ts: float, host_
     return e
 
 class GiveawayView(View):
-    """Vista persistente; el custom_id es fijo y busca el giveaway por el
-    ID del mensaje al que está pegada, así funciona tras reiniciar el bot."""
     def __init__(self):
         super().__init__(timeout=None)
 
@@ -1265,7 +1255,6 @@ async def _giveaway_watcher():
 
 async def _publish_giveaway(interaction: discord.Interaction, draft: dict, titulo: str = None,
                              descripcion: str = None, imagen: str = None, thumb: str = None):
-    """Publica el giveaway ya sea con apariencia por defecto o personalizada."""
     target = draft["channel"]
     end_ts = time.time() + draft["secs"]
     short_id = _next_giveaway_id(draft["guild_id"])
@@ -1320,8 +1309,6 @@ class GiveawayCustomizeModal(discord.ui.Modal, title="🎨 Personalizar giveaway
                                 self.imagen.value, self.thumbnail.value)
 
 class GiveawayDraftView(View):
-    """Panel que aparece tras /giveaway-start para elegir si publicar tal
-    cual o personalizar imagen/thumbnail/título/descripción antes."""
     def __init__(self, draft: dict):
         super().__init__(timeout=180)
         self.draft = draft
@@ -1391,9 +1378,6 @@ class GiveawayChannelSelect(discord.ui.ChannelSelect):
             ephemeral=True)
 
 class GiveawayStartView(View):
-    """Primer paso de /giveaway-start: elegir canal (opcional) y abrir el
-    formulario con los datos del giveaway. Ningún dato se pide como opción
-    del comando — todo se configura aquí."""
     def __init__(self, host_id: int, guild_id: int, default_channel: discord.TextChannel):
         super().__init__(timeout=180)
         self.host_id = host_id
@@ -1525,7 +1509,6 @@ async def cmd_giveaway_info(interaction: discord.Interaction, id: str):
 # ── SLASH — MODERACIÓN ───────────────────────────────────────────────
 
 WARNS_FILE = "warns.json"
-# warns: { "guild_id": { "user_id": [ {"reason":.., "mod_id":.., "ts":..} ] } }
 warns: dict = load_json(WARNS_FILE, {})
 def _save_warns(): save_json(WARNS_FILE, warns)
 
@@ -1753,11 +1736,9 @@ async def cmd_remind(interaction: discord.Interaction, duracion: str, mensaje: s
                     f"({E_INFO} usa `/remindlist` para ver tus recordatorios pendientes)",
         color=C_RED)
     await interaction.response.send_message(embed=e, ephemeral=True)
-    # Nota: el recordatorio queda guardado en reminders.json y lo dispara
-    # _reminder_watcher(), así que sobrevive aunque el bot se reinicie.
 
 
-_afk_users: dict = {}   # user_id -> mensaje afk
+_afk_users: dict = {}
 
 @bot.tree.command(name="afk", description="Marca que estás AFK (ausente)")
 @app_commands.describe(mensaje="Motivo (opcional)")
@@ -1771,12 +1752,11 @@ async def cmd_afk(interaction: discord.Interaction, mensaje: str = "AFK"):
 # ── SISTEMA DE NIVELES / XP ──────────────────────────────────────────
 
 LEVELS_FILE = "levels.json"
-# levels: { "guild_id": { "user_id": {"xp": int, "level": int} } }
 levels: dict = load_json(LEVELS_FILE, {})
 def _save_levels(): save_json(LEVELS_FILE, levels)
 
-_xp_cooldown: dict = {}   # (guild_id, user_id) -> last_ts
-XP_MIN, XP_MAX, XP_COOLDOWN = 8, 18, 45   # xp por mensaje y segundos de espera
+_xp_cooldown: dict = {}
+XP_MIN, XP_MAX, XP_COOLDOWN = 8, 18, 45
 
 def _xp_for_level(level: int) -> int:
     return 5 * (level ** 2) + 50 * level + 100
@@ -1908,7 +1888,6 @@ async def _setlevel_err(i, e):
 
 ECONOMY_FILE = "economy.json"
 CURRENCY = "🪙"
-# economy: { "guild_id": { "user_id": {"balance": int, "last_daily": ts, "last_work": ts} } }
 economy: dict = load_json(ECONOMY_FILE, {})
 def _save_eco(): save_json(ECONOMY_FILE, economy)
 
@@ -2122,17 +2101,13 @@ async def _clear_err(i, e):
 # ── AUTOMOD + LOGS + BIENVENIDAS ─────────────────────────────────────
 
 GUILD_CONFIG_FILE = "guild_config.json"
-# guild_config: { "guild_id": {
-#   "automod_on": bool, "bad_words": [..], "mod_log": id,
-#   "welcome_channel": id, "welcome_msg": str,
-#   "leave_channel": id, "leave_msg": str, "autorole": id } }
 guild_config: dict = load_json(GUILD_CONFIG_FILE, {})
 def _save_gc(): save_json(GUILD_CONFIG_FILE, guild_config)
 def _gc(guild_id: int) -> dict:
     return guild_config.setdefault(str(guild_id), {})
 
-_last_deleted: dict = {}   # channel_id -> {"author":.., "content":.., "ts":..}
-_last_edited: dict = {}    # channel_id -> {"author":.., "before":.., "after":.., "ts":..}
+_last_deleted: dict = {}
+_last_edited: dict = {}
 
 async def _check_automod(message: discord.Message):
     if not message.guild or message.author.guild_permissions.manage_messages: return
@@ -2161,7 +2136,6 @@ async def _check_automod(message: discord.Message):
 async def _handle_member_join(member: discord.Member):
     cfg = _gc(member.guild.id)
 
-    # ── ANTI-RAID: cuentas demasiado nuevas ──
     min_days = cfg.get("antiraid_min_days")
     if min_days:
         age_days = (datetime.now(timezone.utc) - member.created_at).days
@@ -2180,7 +2154,7 @@ async def _handle_member_join(member: discord.Member):
                         await log_ch.send(embed=le)
                     return
                 except Exception: pass
-            else:  # action == "role" -> marca como sospechoso, no bloquea el join
+            else:
                 sus_role_id = cfg.get("antiraid_role")
                 if sus_role_id:
                     role = member.guild.get_role(sus_role_id)
@@ -2195,7 +2169,6 @@ async def _handle_member_join(member: discord.Member):
                     try: await log_ch.send(embed=le)
                     except Exception: pass
 
-    # ── VERIFICACIÓN (captcha) ──
     unverified_id = cfg.get("unverified_role")
     if unverified_id:
         role = member.guild.get_role(unverified_id)
@@ -2475,7 +2448,6 @@ for _c in (cmd_autorole_set, cmd_autorole_off):
 
 class RoleMenuSelect(Select):
     def __init__(self, options_map: dict):
-        # options_map: {role_id(str): label}
         opts = [discord.SelectOption(label=label, value=rid) for rid, label in options_map.items()]
         super().__init__(placeholder="Elige tus roles...", min_values=0,
                          max_values=len(opts), options=opts,
@@ -2813,8 +2785,6 @@ async def cmd_roleinfo(interaction: discord.Interaction, rol: discord.Role):
 # ── STARBOARD ─────────────────────────────────────────────────────────
 
 STARBOARD_FILE = "starboard.json"
-# starboard cfg vive en guild_config bajo "star_channel"/"star_threshold"/"star_emoji"
-# starboard_posts: { "original_message_id": starboard_message_id }
 starboard_posts: dict = load_json(STARBOARD_FILE, {})
 def _save_star(): save_json(STARBOARD_FILE, starboard_posts)
 
@@ -2961,7 +2931,6 @@ async def cmd_calc(interaction: discord.Interaction, expresion: str):
 # ── RECORDATORIOS PERSISTENTES ───────────────────────────────────────
 
 REMINDERS_FILE = "reminders.json"
-# reminders: { "id": {"user_id":.., "channel_id":.., "guild_id":.., "text":.., "due_ts":.., "done": bool} }
 reminders: dict = load_json(REMINDERS_FILE, {})
 def _save_reminders(): save_json(REMINDERS_FILE, reminders)
 
@@ -3008,8 +2977,8 @@ async def cmd_remindlist(interaction: discord.Interaction):
 # ── SEGURIDAD: VERIFICACIÓN POR CAPTCHA ──────────────────────────────
 # ══════════════════════════════════════════════════════════════════
 
-_CAPTCHA_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"   # sin O/0/I/1 para evitar confusiones
-_captcha_state: dict = {}   # user_id -> {"code":.., "guild_id":.., "expires":.., "attempts":..}
+_CAPTCHA_CHARS = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
+_captcha_state: dict = {}
 
 def _gen_captcha_code(length: int = 6) -> str:
     return "".join(random.choice(_CAPTCHA_CHARS) for _ in range(length))
@@ -3019,7 +2988,6 @@ def _render_captcha_image(code: str) -> discord.File:
     img = Image.new("RGB", (W, H), (25, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # ruido de fondo (líneas y puntos rojizos)
     for _ in range(6):
         x1, y1 = random.randint(0, W), random.randint(0, H)
         x2, y2 = random.randint(0, W), random.randint(0, H)
@@ -3070,7 +3038,6 @@ class CaptchaModal(discord.ui.Modal, title="Verificación — Escribe el código
             return await interaction.response.send_message(
                 f"{E_NO} Código incorrecto. Intentos restantes: {3 - state['attempts']}.", ephemeral=True)
 
-        # ── éxito ──
         _captcha_state.pop(interaction.user.id, None)
         cfg = _gc(interaction.guild_id)
         member = interaction.user
@@ -3402,11 +3369,6 @@ async def cmd_help(interaction: discord.Interaction):
     await interaction.response.send_message(embed=e, view=v)
 
 # ── COMANDOS POR PREFIJO (nombre del bot) ────────────────────────────
-# Estos responden cuando escribes el nombre/trigger del bot antes del
-# comando, ej:  "fmd ping"   "FMD BOT afk estudiando"   "fmd 8ball ...?"
-# Sirven como atajo rápido para los comandos más usados; para las opciones
-# avanzadas (con varios parámetros, como /ticket-setup o /giveaway-start)
-# usa siempre el comando slash correspondiente.
 
 @bot.command(name="ping")
 async def prefix_ping(ctx: commands.Context):
@@ -3511,8 +3473,6 @@ async def prefix_help(ctx: commands.Context):
     e.set_footer(text=_footer(), icon_url=URL_REDPT)
     await ctx.send(embed=e)
 
-
-# ── más comandos rápidos por texto ──
 
 @bot.command(name="say")
 @commands.has_permissions(manage_messages=True)
@@ -3667,7 +3627,7 @@ async def prefix_warnings(ctx: commands.Context, usuario: discord.Member = None)
 @commands.has_permissions(manage_messages=True)
 async def prefix_clear(ctx: commands.Context, cantidad: int = 10):
     cantidad = max(1, min(cantidad, 100))
-    deleted = await ctx.channel.purge(limit=cantidad + 1)  # +1 para incluir el propio comando
+    deleted = await ctx.channel.purge(limit=cantidad + 1)
     e = discord.Embed(description=f"{E_CHECK} Se eliminaron **{len(deleted)-1}** mensajes.", color=C_RED)
     e.set_footer(text=_footer(), icon_url=URL_REDPT)
     msg = await ctx.send(embed=e)
