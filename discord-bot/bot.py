@@ -7,8 +7,8 @@ import logging
 import threading
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from logging.handlers import RotatingFileHandler
 from urllib.parse import quote
-from pathlib import Path
 
 import discord
 from discord import app_commands
@@ -18,45 +18,44 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── CONFIGURACIÓN ─────────────────────────────────────────────────
+# ── LOGGING ──────────────────────────────────────────────────────
+LOG_FILE = "bot_logs.txt"
+logger = logging.getLogger("FMD_BOT")
+logger.setLevel(logging.INFO)
+_file_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+_fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+_file_handler.setFormatter(_fmt)
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_fmt)
+logger.addHandler(_file_handler)
+logger.addHandler(_console_handler)
+
+# ── CONFIGURACIÓN ──────────────────────────────────────────────
 DISCORD_TOKEN      = os.environ.get("DISCORD_TOKEN", "")
 PORT               = int(os.environ.get("PORT", "8080"))
 SUPPORT_SERVER_URL = os.environ.get("SUPPORT_SERVER_URL", "https://discord.gg/nU9MNnByHH")
 BOT_INVITE_URL     = os.environ.get("BOT_INVITE_URL", "https://discord.com/oauth2/authorize?client_id=1525629900038475969")
-BOT_NAME           = "FMD BOT • BYPASS"
-BOT_CREDIT         = "KING"
 
-# ── API Y ARCHIVOS ──────────────────────────────────────────────
 VPS_BYPASS_ENDPOINT    = "https://4pi-bypass.vercel.app/api/bypass?url="
 VPS_BYPASS_TIMEOUT     = 30
 VPS_BYPASS_MAX_RETRIES = 3
 VPS_BYPASS_RETRY_DELAY = 3
 
-AUTOBYPASS_FILE = "autobypass_channels.json"
-USER_LANG_FILE  = "user_lang.json"
-LOG_FILE        = "bot_logs.txt"
-LOCALES_DIR     = Path("locales")
+AUTOBYPASS_CHANNELS_FILE = "autobypass_channels.json"
 
-# ── LOGGING ──────────────────────────────────────────────────────
-logger = logging.getLogger("FMD_BOT")
-logger.setLevel(logging.INFO)
-_file_handler = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
-_file_handler.setFormatter(logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
-_console_handler = logging.StreamHandler()
-_console_handler.setFormatter(_file_handler.formatter)
-logger.addHandler(_file_handler)
-logger.addHandler(_console_handler)
-
-# ── URLs DE TUS EMOJIS ──────────────────────────────────────────
+# ── TUS EMOJIS (TODOS USADOS) ─────────────────────────────────
 URL_GREEN_DOT = "https://cdn.discordapp.com/emojis/1425942717208199389.webp?size=100&animated=true"
 URL_CROWN     = "https://cdn.discordapp.com/emojis/1511381348433264851.webp?size=100&animated=true"
 URL_KEY       = "https://cdn.discordapp.com/emojis/1525381310200414310.webp?size=100"
 URL_CLOCK     = "https://cdn.discordapp.com/emojis/1525380296852377711.webp?size=100&animated=true"
 URL_SUCCESS   = "https://cdn.discordapp.com/emojis/1502854400769790003.webp?size=100"
-URL_LOADING   = "https://cdn.discordapp.com/emojis/1493714096795943063.webp?size=100&animated=true"
-URL_COPY      = "https://cdn.discordapp.com/emojis/1525379105111932958.webp?size=100"
-URL_DISCORD   = "https://cdn.discordapp.com/emojis/1440409825979928706.webp?size=100"
-URL_INVITE    = "https://cdn.discordapp.com/emojis/1377273773710905414.webp?size=100"
+URL_PC        = "https://cdn.discordapp.com/emojis/1516371549471506435.webp?size=100"
+URL_LOADER    = "https://cdn.discordapp.com/emojis/1493714096795943063.webp?size=100&animated=true"
+
+# ── COLORES ──────────────────────────────────────────────────────
+C_GREEN  = 0x00FF66  # Verde neón elegante (pedido)
+C_WARN   = 0xFFA500  # Naranja para carga
+C_ERROR  = 0xED4245  # Rojo para errores
 
 # ── HELPERS ──────────────────────────────────────────────────────
 BOT_START_TIME = datetime.now(timezone.utc)
@@ -68,94 +67,126 @@ def _is_valid_url(url: str) -> bool:
 def _uptime() -> str:
     d = datetime.now(timezone.utc) - BOT_START_TIME
     t = int(d.total_seconds())
-    h, r = divmod(t, 3600); m, s = divmod(r, 60)
+    h, r = divmod(t, 3600)
+    m, s = divmod(r, 60)
     return f"{h}h {m}m {s}s"
 
-# ── SISTEMA DE IDIOMAS (MODULAR) ──────────────────────────────
-class LocalizationManager:
-    def __init__(self):
-        self.translations = {}
-        self.load_locales()
+def _footer() -> str:
+    return "Made by KING • FMD BOT • BYPASS"
 
-    def load_locales(self):
-        if not LOCALES_DIR.exists():
-            LOCALES_DIR.mkdir()
-        # Carga los archivos de idioma
-        for file in LOCALES_DIR.glob("*.json"):
-            lang_code = file.stem
-            try:
-                with open(file, "r", encoding="utf-8") as f:
-                    self.translations[lang_code] = json.load(f)
-            except Exception as e:
-                logger.error(f"Error loading locale {lang_code}: {e}")
-        # Siempre debe existir inglés como fallback
-        if "en" not in self.translations:
-            logger.warning("English locale not found, creating fallback.")
-            self.translations["en"] = {
-                "language_name": "English",
-                "bypass_loading_title": "Generating Bypass...",
-                "bypass_loading_desc": "Please wait...",
-                "bypass_completed_title": "Bypass Completed",
-                "bypass_result_label": "Result",
-                "bypass_duration_label": "Duration",
-                "bypass_duration_value": "Seconds",
-                "bypass_status_label": "Status",
-                "bypass_status_value": "Successfully Generated",
-                "bypass_platform_label": "Platform",
-                "bypass_pc": "PC",
-                "bypass_mobile": "Mobile",
-                "bypass_footer": "Made by KING • FMD BOT • BYPASS",
-                "bypass_footer_autodelete": "Auto delete in 120 seconds",
-                "button_copy": "Copy",
-                "button_discord": "Discord",
-                "button_invite": "Invite",
-                "copy_success": "✅ Copied Successfully!",
-                "invalid_url": "⚠️ Invalid URL. Make sure to include `http://` or `https://`.",
-                "autobypass_enabled_title": "Auto-Bypass Enabled",
-                "autobypass_enabled_desc": "Every link in {channel} will be bypassed automatically.",
-                "autobypass_disabled_title": "Auto-Bypass Disabled",
-                "autobypass_disabled_desc": "{channel} will no longer auto-bypass.",
-                "admin_only": "🚫 You need **Administrator** permissions!",
-                "ping_title": "Pong!",
-                "ping_latency": "Latency",
-                "ping_uptime": "Uptime",
-                "ping_servers": "Servers",
-                "command_language_desc": "Change the bot's language",
-                "command_language_ephemeral": "🌐 Language set to **English**!"
-            }
-
-    def get(self, lang_code: str, key: str, **kwargs) -> str:
-        # Fallback si no existe el idioma o la clave
-        if lang_code in self.translations and key in self.translations[lang_code]:
-            text = self.translations[lang_code][key]
+def _get_platform(interaction: discord.Interaction) -> tuple:
+    """
+    Detecta si el usuario está en PC o Móvil.
+    Retorna: (Emoji string, Texto string)
+    """
+    try:
+        # Intentamos obtener el miembro para verificar su estado móvil
+        member = interaction.guild.get_member(interaction.user.id) if interaction.guild else None
+        if member and member.is_on_mobile():
+            return "📱", "Mobile"
         else:
-            text = self.translations.get("en", {}).get(key, key)
-        # Formateo de variables (ej: {channel})
-        return text.format(**kwargs) if kwargs else text
+            return "🖥️", "PC"
+    except Exception:
+        return "🖥️", "PC"
 
-    def detect_language(self, interaction: discord.Interaction) -> str:
-        # 1. Usuario guardó idioma manualmente
-        user_lang = load_json(USER_LANG_FILE, {})
-        if str(interaction.user.id) in user_lang:
-            return user_lang[str(interaction.user.id)]
-        # 2. Detección automática por locale de Discord
-        locale_map = {
-            "en-US": "en", "en-GB": "en", "es-ES": "es", "es-LA": "es",
-            "pt-BR": "pt", "fr": "fr", "de": "de", "it": "it",
-            "ru": "ru", "tr": "tr", "ar": "ar", "ja": "ja",
-            "ko": "ko", "zh-CN": "zh", "zh-TW": "zh"
-        }
-        detected = locale_map.get(str(interaction.locale), "en")
-        return detected if detected in self.translations else "en"
+# ── MOTOR DE BYPASS (Robusto) ──────────────────────────────────
+_http_session = requests.Session()
+_http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
 
-i18n = LocalizationManager()
+_BYPASS_RESULT_KEYS = (
+    "content", "result", "loadstring", "bypassed", "bypassed_link",
+    "bypassed_url", "final_url", "destination", "url", "link", "key", "output"
+)
 
-# ── JSON HELPERS ────────────────────────────────────────────────
+def _extract_bypass_result(data):
+    if isinstance(data, dict):
+        for key in _BYPASS_RESULT_KEYS:
+            if key in data:
+                value = data[key]
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+                if isinstance(value, (dict, list)):
+                    nested = _extract_bypass_result(value)
+                    if nested:
+                        return nested
+        for value in data.values():
+            if isinstance(value, (dict, list)):
+                nested = _extract_bypass_result(value)
+                if nested:
+                    return nested
+    elif isinstance(data, list):
+        for item in data:
+            nested = _extract_bypass_result(item)
+            if nested:
+                return nested
+    return None
+
+def bypass_url_vps(url: str):
+    last_error = "Error desconocido"
+    for attempt in range(1, VPS_BYPASS_MAX_RETRIES + 1):
+        try:
+            full_url = VPS_BYPASS_ENDPOINT + quote(url, safe="")
+            resp = _http_session.get(full_url, timeout=VPS_BYPASS_TIMEOUT)
+
+            if resp.status_code != 200:
+                last_error = f"HTTP {resp.status_code}"
+                if attempt < VPS_BYPASS_MAX_RETRIES:
+                    time.sleep(VPS_BYPASS_RETRY_DELAY)
+                    continue
+                return None, last_error
+
+            try:
+                data = resp.json()
+            except Exception:
+                txt = resp.text.strip()
+                if txt.startswith("http"):
+                    return txt, None
+                last_error = "Respuesta inválida de la API"
+                if attempt < VPS_BYPASS_MAX_RETRIES:
+                    time.sleep(VPS_BYPASS_RETRY_DELAY)
+                    continue
+                return None, last_error
+
+            api_says_error = False
+            if isinstance(data, dict):
+                status_val = str(data.get("status", "")).lower()
+                if data.get("success") is False or data.get("error") or status_val == "error":
+                    api_says_error = True
+
+            result = _extract_bypass_result(data)
+
+            if result and not api_says_error:
+                return str(result), None
+
+            if api_says_error:
+                err_msg = None
+                if isinstance(data, dict):
+                    err_msg = data.get("message") or data.get("error")
+                last_error = str(err_msg or "La API reportó un error.")
+                if attempt < VPS_BYPASS_MAX_RETRIES:
+                    time.sleep(VPS_BYPASS_RETRY_DELAY)
+                    continue
+                return None, last_error
+
+            return None, "No se encontró resultado en la API."
+
+        except requests.exceptions.Timeout:
+            last_error = f"Tiempo de espera agotado ({VPS_BYPASS_TIMEOUT}s)"
+            if attempt < VPS_BYPASS_MAX_RETRIES:
+                time.sleep(VPS_BYPASS_RETRY_DELAY)
+        except Exception as e:
+            last_error = str(e)[:100]
+            if attempt < VPS_BYPASS_MAX_RETRIES:
+                time.sleep(VPS_BYPASS_RETRY_DELAY)
+
+    return None, last_error
+
+# ── ARCHIVOS JSON ──────────────────────────────────────────────
 def load_json(path, default):
     if os.path.exists(path):
         try:
             with open(path, encoding="utf-8") as f:
-                return json.load(f)
+                return set(json.load(f))
         except Exception:
             pass
     return default
@@ -163,124 +194,75 @@ def load_json(path, default):
 def save_json(path, data):
     try:
         with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2, ensure_ascii=False)
+            json.dump(list(data), f, indent=2, ensure_ascii=False)
     except Exception as e:
         logger.warning(f"save_json: {e}")
 
-autobypass_channels = set(load_json(AUTOBYPASS_FILE, []))
-def _save_ab(): save_json(AUTOBYPASS_FILE, list(autobypass_channels))
+autobypass_channels = load_json(AUTOBYPASS_CHANNELS_FILE, set())
 
-# ── MOTOR DE BYPASS ──────────────────────────────────────────────
-_http_session = requests.Session()
-_http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
-
-_BYPASS_KEYS = ("content","result","loadstring","bypassed","bypassed_link","bypassed_url","final_url","destination","url","link","key","output")
-
-def _extract_bypass_result(data):
-    if isinstance(data, dict):
-        for k in _BYPASS_KEYS:
-            if k in data:
-                v = data[k]
-                if isinstance(v, str) and v.strip(): return v.strip()
-                if isinstance(v, (dict, list)): return _extract_bypass_result(v)
-        for v in data.values():
-            if isinstance(v, (dict, list)): return _extract_bypass_result(v)
-    elif isinstance(data, list):
-        for item in data: return _extract_bypass_result(item)
-    return None
-
-def bypass_url_sync(url: str):
-    last_err = "Unknown error"
-    for attempt in range(1, VPS_BYPASS_MAX_RETRIES + 1):
-        try:
-            resp = _http_session.get(VPS_BYPASS_ENDPOINT + quote(url, safe=""), timeout=VPS_BYPASS_TIMEOUT)
-            if resp.status_code != 200:
-                last_err = f"HTTP {resp.status_code}"
-                if attempt < VPS_BYPASS_MAX_RETRIES: time.sleep(VPS_BYPASS_RETRY_DELAY); continue
-                return None, last_err
-            try:
-                data = resp.json()
-            except Exception:
-                txt = resp.text.strip()
-                if txt.startswith("http"): return txt, None
-                last_err = "Invalid API response"
-                if attempt < VPS_BYPASS_MAX_RETRIES: time.sleep(VPS_BYPASS_RETRY_DELAY); continue
-                return None, last_err
-            api_err = isinstance(data, dict) and (data.get("success") is False or data.get("error") or str(data.get("status","")).lower() == "error")
-            result = _extract_bypass_result(data)
-            if result and not api_err: return result, None
-            if api_err:
-                msg = (data.get("message") or data.get("error")) if isinstance(data, dict) else None
-                last_err = str(msg or "No result found")
-                if attempt < VPS_BYPASS_MAX_RETRIES: time.sleep(VPS_BYPASS_RETRY_DELAY); continue
-                return None, last_err
-            return None, "No result found"
-        except requests.exceptions.Timeout:
-            last_err = f"Timeout ({VPS_BYPASS_TIMEOUT}s)"
-            if attempt < VPS_BYPASS_MAX_RETRIES: time.sleep(VPS_BYPASS_RETRY_DELAY)
-        except Exception as e:
-            last_err = str(e)[:100]
-            if attempt < VPS_BYPASS_MAX_RETRIES: time.sleep(VPS_BYPASS_RETRY_DELAY)
-    return None, last_err
-
-# ── EMBEDS DISEÑO VERDE ──────────────────────────────────────────
-def embed_loading(lang: str) -> discord.Embed:
-    e = discord.Embed(color=0xFFA500, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=i18n.get(lang, "bypass_loading_title"), icon_url=URL_LOADING)
-    e.description = i18n.get(lang, "bypass_loading_desc")
-    e.set_footer(text=i18n.get(lang, "bypass_footer"))
+# ── EMBEDS (Diseño Verde Premium) ──────────────────────────────
+def embed_loading() -> discord.Embed:
+    e = discord.Embed(color=C_WARN, timestamp=datetime.now(timezone.utc))
+    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
+    e.title = "⏳ Generating Bypass..."
+    e.description = "Please wait..."
+    e.set_thumbnail(url=URL_LOADER)
+    e.set_footer(text=_footer())
     return e
 
-def embed_success(result: str, elapsed: float, user: discord.User, lang: str, is_mobile: bool) -> discord.Embed:
-    e = discord.Embed(color=0x00FF66, timestamp=datetime.now(timezone.utc))
-    # Título con punto verde y texto
-    e.set_author(name=f"🟢 {i18n.get(lang, 'bypass_completed_title')}", icon_url=URL_GREEN_DOT)
-    # Miniatura (Corona)
+def embed_success(result: str, elapsed: float, interaction: discord.Interaction) -> discord.Embed:
+    platform_emoji, platform_text = _get_platform(interaction)
+    
+    e = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
+    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
+    e.title = "🟢 Bypass Completed"
+    e.description = "Generated successfully • Auto delete in 120 seconds"
+    e.set_thumbnail(url=URL_CROWN)  # Solo la corona como miniatura
+    
+    e.add_field(name="🔑 Result", value=f"```txt\n{result[:900]}\n```", inline=False)
+    e.add_field(name="🕒 Duration", value=f"`{elapsed:.2f}s`", inline=True)
+    e.add_field(name="✅ Status", value="Successfully Generated", inline=True)
+    e.add_field(name=f"{platform_emoji} Platform", value=platform_text, inline=True)
+    
+    e.set_footer(text=_footer())
+    return e
+
+def embed_fail(error: str, elapsed: float, interaction: discord.Interaction) -> discord.Embed:
+    platform_emoji, platform_text = _get_platform(interaction)
+    
+    e = discord.Embed(color=C_ERROR, timestamp=datetime.now(timezone.utc))
+    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
+    e.title = "🟢 Bypass Failed"
+    e.description = "Something went wrong!"
     e.set_thumbnail(url=URL_CROWN)
-    # Campo Resultado (el más grande)
-    e.add_field(name=f"🔑 {i18n.get(lang, 'bypass_result_label')}", value=f"```txt\n{result[:900]}\n```", inline=False)
-    # Campo Duración
-    e.add_field(name=f"🕒 {i18n.get(lang, 'bypass_duration_label')}", value=f"**{elapsed:.2f}** {i18n.get(lang, 'bypass_duration_value')}", inline=True)
-    # Campo Estado
-    e.add_field(name=f"✅ {i18n.get(lang, 'bypass_status_label')}", value=f"**{i18n.get(lang, 'bypass_status_value')}**", inline=True)
-    # Campo Plataforma
-    platform_icon = "📱" if is_mobile else "🖥️"
-    platform_name = i18n.get(lang, "bypass_mobile") if is_mobile else i18n.get(lang, "bypass_pc")
-    e.add_field(name=i18n.get(lang, "bypass_platform_label"), value=f"{platform_icon} {platform_name}", inline=True)
-    # Footer con auto-eliminación
-    e.set_footer(text=f"{i18n.get(lang, 'bypass_footer')} • {i18n.get(lang, 'bypass_footer_autodelete')}")
+    
+    e.add_field(name="⚠️ Error", value=f"```\n{error or 'Unknown error'}\n```", inline=False)
+    e.add_field(name="🕒 Duration", value=f"`{elapsed:.2f}s`", inline=True)
+    e.add_field(name=f"{platform_emoji} Platform", value=platform_text, inline=True)
+    
+    e.set_footer(text=_footer())
     return e
 
-def embed_fail(error: str, elapsed: float, user: discord.User, lang: str) -> discord.Embed:
-    e = discord.Embed(color=0xED4245, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"⚠️ {i18n.get(lang, 'bypass_completed_title')}", icon_url=URL_GREEN_DOT)
-    e.set_thumbnail(url=URL_CROWN)
-    e.add_field(name="⚠️ Error", value=f"```\n{error or '?'}\n```", inline=False)
-    e.add_field(name=f"🕒 {i18n.get(lang, 'bypass_duration_label')}", value=f"**{elapsed:.2f}** {i18n.get(lang, 'bypass_duration_value')}", inline=False)
-    e.set_footer(text=i18n.get(lang, "bypass_footer"))
-    return e
-
-# ── VIEW (BOTONES) ──────────────────────────────────────────────
+# ── VIEW (Solo 3 Botones) ──────────────────────────────────────
 class FmdBypassView(View):
-    def __init__(self, result: str, elapsed: float, lang: str):
+    def __init__(self, result: str):
         super().__init__(timeout=None)
         self._result = result
-        self._lang = lang
+        
+        # Botón de Discord (Link)
+        self.add_item(Button(label="Discord", emoji="💬", url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link, row=0))
+        # Botón de Invite (Link)
+        self.add_item(Button(label="Invite", emoji="➕", url=BOT_INVITE_URL, style=discord.ButtonStyle.link, row=0))
 
-        self.add_item(Button(label=i18n.get(lang, "button_invite"), emoji="➕", url=BOT_INVITE_URL, style=discord.ButtonStyle.link, row=0))
-        self.add_item(Button(label=i18n.get(lang, "button_discord"), emoji="💬", url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link, row=0))
-
-    @discord.ui.button(label="📋 Copy", style=discord.ButtonStyle.primary, row=0)
+    @discord.ui.button(label="📋  Copy", style=discord.ButtonStyle.success, row=0)
     async def copy_btn(self, interaction: discord.Interaction, button: Button):
+        # El bloque de código permite copiar con un clic en móvil y PC
         await interaction.response.send_message(
-            f"```txt\n{self._result[:1000]}\n```",
+            f"```txt\n{self._result}\n```\n✅ Copied Successfully!",
             ephemeral=True
         )
-        # Ephemeral no se puede editar/eliminar fácilmente, pero enviamos la confirmación aparte si se desea.
-        # El mensaje efímero ya tiene el contenido. Mandaremos un followup de confirmación.
-        await interaction.followup.send(i18n.get(self._lang, "copy_success"), ephemeral=True)
 
-# ── AUTO ELIMINACIÓN ─────────────────────────────────────────────
+# ── AUTO ELIMINACIÓN (120 segundos) ────────────────────────────
 async def auto_delete_msg(message: discord.Message, delay: int = 120):
     await asyncio.sleep(delay)
     try:
@@ -298,143 +280,149 @@ class FmdBot(discord.Client):
 
     async def setup_hook(self):
         await self.tree.sync()
-        logger.info("✅ Global commands synced.")
+        logger.info("✅ Comandos globales sincronizados.")
 
     async def on_ready(self):
-        logger.info(f"✅ {BOT_NAME} online! Servers: {len(self.guilds)}")
+        logger.info("=========================================")
+        logger.info(f"✅ {self.user.name} Online!")
+        logger.info(f"📡 Servidores: {len(self.guilds)}")
+        logger.info("=========================================")
         await self.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/bypass"))
 
     async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.guild: return
+        if message.author.bot or not message.guild:
+            return
         if message.channel.id in autobypass_channels:
             urls = _URL_RE.findall(message.content)
             if urls:
                 asyncio.create_task(self._auto_bypass(message, urls))
 
     async def _auto_bypass(self, message: discord.Message, urls: list):
-        try: await message.delete()
-        except Exception: pass
-        lang = i18n.detect_language(message) # No tenemos interaction aquí, pasamos el mensaje
-        # Detectar idioma del usuario en auto-bypass (usamos el guardado o inglés)
-        user_lang = load_json(USER_LANG_FILE, {}).get(str(message.author.id), "en")
+        try:
+            await message.delete()
+        except Exception:
+            pass
 
         loop = asyncio.get_running_loop()
         for url in urls[:3]:
-            if not _is_valid_url(url): continue
+            if not _is_valid_url(url):
+                continue
+
             try:
-                status_msg = await message.channel.send(content=message.author.mention, embed=embed_loading(user_lang))
-            except Exception: continue
+                status_msg = await message.channel.send(content=message.author.mention, embed=embed_loading())
+            except Exception:
+                continue
+
             t0 = time.time()
-            result, error = await loop.run_in_executor(None, bypass_url_sync, url)
+            result, error = await loop.run_in_executor(None, bypass_url_vps, url)
             elapsed = time.time() - t0
+
             try:
                 if result:
+                    # Crear el mensaje de éxito (usamos la interacción de la mensajería, pasamos el mensaje original como objeto)
+                    # Para la detección de plataforma, necesitamos un objeto Interaction. 
+                    # Como esto es auto-bypass, usaremos un embed genérico sin la detección de plataforma, o asumimos PC.
+                    embed = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
+                    embed.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
+                    embed.title = "🟢 Bypass Completed"
+                    embed.description = "Generated successfully • Auto delete in 120 seconds"
+                    embed.set_thumbnail(url=URL_CROWN)
+                    embed.add_field(name="🔑 Result", value=f"```txt\n{result[:900]}\n```", inline=False)
+                    embed.add_field(name="🕒 Duration", value=f"`{elapsed:.2f}s`", inline=True)
+                    embed.add_field(name="✅ Status", value="Successfully Generated", inline=True)
+                    embed.add_field(name="🖥️ Platform", value="Auto-Bypass", inline=True)
+                    embed.set_footer(text=_footer())
+
                     msg = await status_msg.edit(
                         content=message.author.mention,
-                        embed=embed_success(result, elapsed, message.author, user_lang, message.author.is_mobile()),
-                        view=FmdBypassView(result, elapsed, user_lang)
+                        embed=embed,
+                        view=FmdBypassView(result)
                     )
                 else:
                     msg = await status_msg.edit(
                         content=message.author.mention,
-                        embed=embed_fail(error, elapsed, message.author, user_lang)
+                        embed=embed_fail(error, elapsed, None) # Fallback sin plataforma
                     )
                 asyncio.create_task(auto_delete_msg(msg, 120))
-            except Exception: pass
+            except Exception:
+                pass
 
 bot = FmdBot()
 
 # ── SLASH COMMANDS ──────────────────────────────────────────────
 
-@bot.tree.command(name="bypass", description="Bypass a link and get the real destination")
-@app_commands.describe(url="The link to bypass")
+@bot.tree.command(name="bypass", description="🔓 Bypass un enlace y obtén el destino real")
+@app_commands.describe(url="El enlace a bypassear")
 async def cmd_bypass(interaction: discord.Interaction, url: str):
-    lang = i18n.detect_language(interaction)
     if not _is_valid_url(url):
-        e = discord.Embed(description=i18n.get(lang, "invalid_url"), color=0xFFA500)
-        e.set_footer(text=i18n.get(lang, "bypass_footer"))
+        e = discord.Embed(description="⚠️ URL inválida. Asegúrate de incluir `http://` o `https://`.", color=C_WARN)
+        e.set_footer(text=_footer())
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
-    await interaction.response.send_message(embed=embed_loading(lang))
+    await interaction.response.send_message(embed=embed_loading())
+
     t0 = time.time()
-    result, error = await asyncio.get_running_loop().run_in_executor(None, bypass_url_sync, url)
+    result, error = await asyncio.get_running_loop().run_in_executor(None, bypass_url_vps, url)
     elapsed = time.time() - t0
+
     try:
         if result:
             msg = await interaction.edit_original_response(
-                embed=embed_success(result, elapsed, interaction.user, lang, interaction.user.is_mobile()),
-                view=FmdBypassView(result, elapsed, lang)
+                embed=embed_success(result, elapsed, interaction),
+                view=FmdBypassView(result)
             )
         else:
             msg = await interaction.edit_original_response(
-                embed=embed_fail(error, elapsed, interaction.user, lang)
+                embed=embed_fail(error, elapsed, interaction)
             )
         asyncio.create_task(auto_delete_msg(msg, 120))
     except Exception as e:
-        logger.error(f"Error editing response: {e}")
+        logger.error(f"Error al editar respuesta: {e}")
 
-@bot.tree.command(name="setautobypass", description="[Admin] Enable/Disable auto-bypass in this channel")
+@bot.tree.command(name="setautobypass", description="⚙️ [Admin] Activar/desactivar auto-bypass en este canal")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_setautobypass(interaction: discord.Interaction):
-    lang = i18n.detect_language(interaction)
     cid = interaction.channel_id
     if cid in autobypass_channels:
-        autobypass_channels.discard(cid); _save_ab()
+        autobypass_channels.discard(cid)
+        save_json(AUTOBYPASS_CHANNELS_FILE, autobypass_channels)
         e = discord.Embed(
-            title=i18n.get(lang, "autobypass_disabled_title"),
-            description=i18n.get(lang, "autobypass_disabled_desc", channel=interaction.channel.mention),
-            color=0xED4245
+            title="🔴 Auto-Bypass DESACTIVADO",
+            description=f"{interaction.channel.mention} ya no hará bypass automático.",
+            color=C_ERROR
         )
     else:
-        autobypass_channels.add(cid); _save_ab()
+        autobypass_channels.add(cid)
+        save_json(AUTOBYPASS_CHANNELS_FILE, autobypass_channels)
         e = discord.Embed(
-            title=i18n.get(lang, "autobypass_enabled_title"),
-            description=i18n.get(lang, "autobypass_enabled_desc", channel=interaction.channel.mention),
-            color=0x00FF66
+            title="🟢 Auto-Bypass ACTIVADO",
+            description=f"Cada enlace en {interaction.channel.mention} será bypasseado automáticamente.",
+            color=C_GREEN
         )
-    e.set_author(name=BOT_NAME, icon_url=URL_GREEN_DOT)
-    e.set_footer(text=i18n.get(lang, "bypass_footer"))
+    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
+    e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @cmd_setautobypass.error
 async def _ab_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message(i18n.get(i18n.detect_language(interaction), "admin_only"), ephemeral=True)
+        await interaction.response.send_message("🚫 Necesitas permiso de **Administrador**!", ephemeral=True)
 
-@bot.tree.command(name="ping", description="Check the bot's latency")
+@bot.tree.command(name="ping", description="🏓 Ver la latencia del bot")
 async def cmd_ping(interaction: discord.Interaction):
-    lang = i18n.detect_language(interaction)
     ms = round(bot.latency * 1000)
-    e = discord.Embed(color=0x00FF66, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=i18n.get(lang, "ping_title"), icon_url=URL_GREEN_DOT)
-    e.add_field(name=f"📡 {i18n.get(lang, 'ping_latency')}", value=f"`{ms}ms`", inline=True)
-    e.add_field(name=f"⏰ {i18n.get(lang, 'ping_uptime')}", value=f"`{_uptime()}`", inline=True)
-    e.add_field(name=f"🏰 {i18n.get(lang, 'ping_servers')}", value=f"`{len(bot.guilds)}`", inline=True)
-    e.set_footer(text=i18n.get(lang, "bypass_footer"))
+    e = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
+    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
+    e.add_field(name="📡 Latencia", value=f"`{ms}ms`", inline=True)
+    e.add_field(name="⏰ Uptime", value=f"`{_uptime()}`", inline=True)
+    e.add_field(name="🏰 Servidores", value=f"`{len(bot.guilds)}`", inline=True)
+    e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="language", description="Change the bot's language")
-@app_commands.describe(language="Choose your preferred language")
-@app_commands.choices(language=[
-    app_commands.Choice(name="English", value="en"),
-    app_commands.Choice(name="Español", value="es"),
-    # Añade más aquí según tus archivos en la carpeta locales
-])
-async def cmd_language(interaction: discord.Interaction, language: str):
-    # Guardar preferencia del usuario
-    user_lang = load_json(USER_LANG_FILE, {})
-    user_lang[str(interaction.user.id)] = language
-    save_json(USER_LANG_FILE, user_lang)
-    # Responder en el nuevo idioma
-    lang = language
-    e = discord.Embed(description=i18n.get(lang, "command_language_ephemeral"), color=0x00FF66)
-    e.set_footer(text=i18n.get(lang, "bypass_footer"))
-    await interaction.response.send_message(embed=e, ephemeral=True)
-
-# ── HEALTH SERVER (Render) ──────────────────────────────────────
+# ── HEALTH SERVER (Para Render) ─────────────────────────────────
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
-        body = f'{{"status":"online","bot":"{BOT_NAME}","uptime":"{_uptime()}"}}'.encode()
+        body = f'{{"status":"online","bot":"FMD BOT","uptime":"{_uptime()}"}}'.encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -445,15 +433,15 @@ class _HealthHandler(BaseHTTPRequestHandler):
 def start_web():
     server = HTTPServer(("0.0.0.0", PORT), _HealthHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    logger.info(f"🌐 Health server on port {PORT}")
+    logger.info(f"🌐 Servidor de salud corriendo en puerto :{PORT}")
 
-# ── MAIN ────────────────────────────────────────────────────────
+# ── MAIN ──────────────────────────────────────────────────────
 async def main():
     if not DISCORD_TOKEN:
-        logger.error("❌ DISCORD_TOKEN missing in environment variables.")
+        logger.error("❌ DISCORD_TOKEN no encontrado en variables de entorno.")
         return
     start_web()
-    logger.info(f"🚀 Starting {BOT_NAME}...")
+    logger.info(f"🚀 Iniciando FMD BOT...")
     await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
