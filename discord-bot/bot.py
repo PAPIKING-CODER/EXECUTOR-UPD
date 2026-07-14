@@ -50,32 +50,15 @@ BOT_CREDIT = "BY KING"
 # Cambialo con la variable de entorno BOT_TRIGGER si quieres otra palabra.
 BOT_TRIGGER = os.environ.get("BOT_TRIGGER", "fmd")
 
-BYPASS_API_URL = "https://king-api-25n8.onrender.com/api/bypass?url="
+# ── KING API ─────────────────────────────────────────────────────
+# Docs: https://github.com/PAPIKING-CODER/BYPASS-API
+# Response: { success, destination, service, processingTime }
+BYPASS_API_URL     = "https://king-api-25n8.onrender.com/api/bypass?url="
 SUPPORTED_ENDPOINT = "https://king-api-25n8.onrender.com/api/supported"
-BYPASS_TIMEOUT = 30
-BYPASS_RETRIES = 3
-BYPASS_DELAY   = 3
+BYPASS_TIMEOUT = 30   # segundos máximo por petición
+BYPASS_RETRIES = 3    # reintentos ante error de red
+BYPASS_DELAY   = 3    # segundos entre reintentos
 
-# ── RATE LIMIT GLOBAL para KING API ────────────────────────────────
-# Máximo 10 peticiones cada 10s EN TODO EL BOT (no por usuario).
-# KING API es nuestro propio servidor — límite más holgado que la API anterior.
-# thread-safe porque _bypass_sync corre en threads del executor.
-BANANA_RATE_MAX = 10
-BANANA_RATE_WINDOW = 10.0
-_rl_lock = threading.Lock()
-_rl_times = deque()
-
-def _rate_limit_wait():
-    while True:
-        with _rl_lock:
-            now = time.time()
-            while _rl_times and now - _rl_times[0] >= BANANA_RATE_WINDOW:
-                _rl_times.popleft()
-            if len(_rl_times) < BANANA_RATE_MAX:
-                _rl_times.append(now)
-                return
-            wait = BANANA_RATE_WINDOW - (now - _rl_times[0]) + 0.05
-        time.sleep(wait)
 BYPASS_COOLDOWN = 12          # segundos de espera por usuario entre bypasses
 BYPASS_AUTODELETE = 120       # segundos antes de borrar el mensaje de resultado
 _bypass_cooldowns: dict = {}  # user_id -> timestamp del último bypass
@@ -253,23 +236,25 @@ def _t(guild_id: int, key: str, **kwargs) -> str:
     except Exception:
         return text
 
-# ── BYPASS ENGINE ────────────────────────────────────────────────
-# KING API devuelve "destination"; el resto son fallbacks para APIs antiguas
-_KEYS = ("destination","result","content","loadstring","bypassed","bypassed_link",
-         "bypassed_url","final_url","url","link","key","output")
-_http = requests.Session()
-_http.headers.update({"User-Agent": "FMDBot/1.0"})
+# ── BYPASS ENGINE ─────────────────────────────────────────────────
+# KING API v4.0.0 — respuesta: { success, destination, service, processingTime }
+# El campo clave es siempre "destination". _extract() queda como fallback genérico.
 
-def _extract(data):
+_http = requests.Session()
+_http.headers.update({
+    "User-Agent": "FMDBot/2.0",
+    "Accept":     "application/json",
+})
+
+def _extract(data: dict) -> str | None:
+    """Extrae la URL resultado de cualquier respuesta JSON (fallback genérico)."""
+    _KEYS = ("destination", "result", "content", "loadstring", "bypassed",
+             "bypassed_link", "bypassed_url", "final_url", "url", "link", "key", "output")
     if isinstance(data, dict):
         for k in _KEYS:
-            if k in data:
-                v = data[k]
-                if isinstance(v, str) and v.strip():
-                    return v.strip()
-                if isinstance(v, (dict, list)):
-                    r = _extract(v)
-                    if r: return r
+            v = data.get(k)
+            if isinstance(v, str) and v.strip().startswith("http"):
+                return v.strip()
         for v in data.values():
             if isinstance(v, (dict, list)):
                 r = _extract(v)
@@ -280,41 +265,76 @@ def _extract(data):
             if r: return r
     return None
 
-def _bypass_sync(url: str):
+def _bypass_sync(url: str) -> tuple[str | None, str | None]:
+    """
+    Llama a KING API y devuelve (destination, error).
+    - Extrae `destination` directamente (campo principal de KING API v4.0.0).
+    - Maneja 429 Rate Limit con espera y reintento.
+    - 3 reintentos ante errores de red.
+    """
     last_err = "Error desconocido"
     for attempt in range(1, BYPASS_RETRIES + 1):
         try:
-            _rate_limit_wait()  # nunca más de 10 peticiones cada 10s a KING API
-            resp = _http.get(BYPASS_API_URL + quote(url, safe=""), timeout=BYPASS_TIMEOUT)
+            resp = _http.get(
+                BYPASS_API_URL + quote(url, safe=""),
+                timeout=BYPASS_TIMEOUT,
+            )
+
+            # 429 — Rate limit de KING API: esperar y reintentar
+            if resp.status_code == 429:
+                retry_after = int(resp.headers.get("Retry-After", BYPASS_DELAY))
+                logger.warning("KING API rate limit — esperando %ds", retry_after)
+                time.sleep(retry_after)
+                continue
+
+            # Otro error HTTP
             if resp.status_code != 200:
                 last_err = f"HTTP {resp.status_code}"
                 if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
                 return None, last_err
+
+            # Parsear JSON
             try:
                 data = resp.json()
             except Exception:
                 txt = resp.text.strip()
-                if txt.startswith("http"): return txt, None
-                last_err = "Respuesta inválida"
+                if txt.startswith("http"):
+                    return txt, None
+                last_err = "Respuesta inválida (no es JSON)"
                 if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
                 return None, last_err
-            api_err = isinstance(data, dict) and (
-                data.get("success") is False or data.get("error")
-                or str(data.get("status","")).lower() == "error")
-            result = _extract(data)
-            if result and not api_err: return result, None
-            if api_err:
-                msg = (data.get("message") or data.get("error")) if isinstance(data, dict) else None
-                last_err = str(msg or "Sin resultado")
-                if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
-                return None, last_err
-            return None, "Sin resultado"
+
+            # KING API v4.0.0: { success: bool, destination: str, message: str }
+            if isinstance(data, dict):
+                if data.get("success") is True:
+                    dst = data.get("destination", "")
+                    if dst and dst.startswith("http"):
+                        return dst, None
+                    # success=true pero sin destination — intentar extracción genérica
+                    fallback = _extract(data)
+                    if fallback:
+                        return fallback, None
+                    return None, "La API respondió OK pero no envió destino"
+
+                if data.get("success") is False:
+                    last_err = data.get("message") or data.get("error") or "Sin resultado"
+                    if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
+                    return None, last_err
+
+            # Respuesta sin campo success — extracción genérica
+            dst = _extract(data)
+            if dst:
+                return dst, None
+            return None, "Sin resultado en la respuesta"
+
         except requests.exceptions.Timeout:
             last_err = f"Timeout ({BYPASS_TIMEOUT}s)"
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
         except Exception as ex:
-            last_err = str(ex)[:100]
+            last_err = str(ex)[:120]
+            logger.warning("_bypass_sync error intento %d: %s", attempt, last_err)
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
+
     return None, last_err
 
 # ── BYPASS EMBEDS  (diseño foto 2, tema rojo) ─────────────────────
