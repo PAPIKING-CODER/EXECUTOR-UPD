@@ -24,12 +24,6 @@ import requests
 from PIL import Image, ImageDraw, ImageFont, ImageFilter, ImageOps
 
 try:
-    import qrcode
-    HAS_QRCODE = True
-except ImportError:
-    HAS_QRCODE = False
-
-try:
     from dotenv import load_dotenv; load_dotenv()
 except ImportError:
     pass
@@ -2004,50 +1998,6 @@ async def _clear_err(i, e):
         await i.response.send_message(f"{E_WARN} Necesitas **Gestionar mensajes**.", ephemeral=True)
 
 
-@bot.tree.command(name="purge-user", description="Borra los últimos mensajes de un usuario en el canal (Manage Messages)")
-@app_commands.describe(usuario="Usuario cuyos mensajes se van a borrar",
-                        cantidad="Cuántos mensajes revisar hacia atrás (máx 200)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def cmd_purge_user(interaction: discord.Interaction, usuario: discord.Member,
-                          cantidad: app_commands.Range[int, 1, 200] = 50):
-    await interaction.response.defer(ephemeral=True)
-    deleted = await interaction.channel.purge(limit=cantidad, check=lambda m: m.author.id == usuario.id)
-    e = discord.Embed(description=f"{E_CHECK} Se eliminaron **{len(deleted)}** mensajes de {usuario.mention}.",
-                      color=C_RED)
-    await interaction.followup.send(embed=e, ephemeral=True)
-
-@bot.tree.command(name="purge-bots", description="Borra mensajes de bots en el canal (Manage Messages)")
-@app_commands.describe(cantidad="Cuántos mensajes revisar hacia atrás (máx 200)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def cmd_purge_bots(interaction: discord.Interaction, cantidad: app_commands.Range[int, 1, 200] = 50):
-    await interaction.response.defer(ephemeral=True)
-    deleted = await interaction.channel.purge(limit=cantidad, check=lambda m: m.author.bot)
-    e = discord.Embed(description=f"{E_CHECK} Se eliminaron **{len(deleted)}** mensajes de bots.", color=C_RED)
-    await interaction.followup.send(embed=e, ephemeral=True)
-
-@bot.tree.command(name="purge-contains", description="Borra mensajes que contengan un texto (Manage Messages)")
-@app_commands.describe(texto="Texto a buscar (sin importar mayúsculas)",
-                        cantidad="Cuántos mensajes revisar hacia atrás (máx 200)")
-@app_commands.checks.has_permissions(manage_messages=True)
-async def cmd_purge_contains(interaction: discord.Interaction, texto: str,
-                              cantidad: app_commands.Range[int, 1, 200] = 50):
-    await interaction.response.defer(ephemeral=True)
-    low = texto.lower()
-    deleted = await interaction.channel.purge(limit=cantidad, check=lambda m: low in m.content.lower())
-    e = discord.Embed(description=f"{E_CHECK} Se eliminaron **{len(deleted)}** mensajes que contenían `{texto}`.",
-                      color=C_RED)
-    await interaction.followup.send(embed=e, ephemeral=True)
-
-async def _manage_messages_perm_error(i: discord.Interaction, e: app_commands.AppCommandError):
-    if isinstance(e, app_commands.MissingPermissions):
-        await i.response.send_message(f"{E_WARN} Necesitas **Gestionar mensajes**.", ephemeral=True)
-    else:
-        logger.warning(f"command error: {e}")
-
-for _c in (cmd_purge_user, cmd_purge_bots, cmd_purge_contains):
-    _c.error(_manage_messages_perm_error)
-
-
 # ── AUTOMOD + LOGS + BIENVENIDAS ─────────────────────────────────────
 
 GUILD_CONFIG_FILE = "guild_config.json"
@@ -2259,23 +2209,13 @@ async def cmd_automod_removeword(interaction: discord.Interaction, palabra: str)
     _save_gc()
     await interaction.response.send_message(f"{E_CHECK} Palabra quitada del filtro.", ephemeral=True)
 
-@bot.tree.command(name="automod-words", description="Lista las palabras filtradas (Admin)")
-@app_commands.checks.has_permissions(administrator=True)
-async def cmd_automod_words(interaction: discord.Interaction):
-    words = _gc(interaction.guild_id).get("bad_words", [])
-    e = discord.Embed(
-        description=("`" + "`, `".join(words) + "`") if words else "No hay palabras filtradas.",
-        color=C_RED)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e, ephemeral=True)
-
 async def _admin_perm_error(i: discord.Interaction, e: app_commands.AppCommandError):
     if isinstance(e, app_commands.MissingPermissions):
         await i.response.send_message(f"{E_WARN} Necesitas **Administrador**.", ephemeral=True)
     else:
         logger.warning(f"command error: {e}")
 
-for _c in (cmd_automod_toggle, cmd_automod_addword, cmd_automod_removeword, cmd_automod_words):
+for _c in (cmd_automod_toggle, cmd_automod_addword, cmd_automod_removeword):
     _c.error(_admin_perm_error)
 
 
@@ -2596,36 +2536,6 @@ async def cmd_meme(interaction: discord.Interaction, arriba: str = "", abajo: st
     await interaction.followup.send(file=_to_file(img, "meme.png"))
 
 
-@bot.tree.command(name="qr", description="Genera un código QR")
-@app_commands.describe(texto="Texto o URL a codificar")
-async def cmd_qr(interaction: discord.Interaction, texto: str):
-    if not HAS_QRCODE:
-        return await interaction.response.send_message(
-            f"{E_WARN} Falta instalar la librería `qrcode` en el servidor del bot (`pip install qrcode[pil]`).",
-            ephemeral=True)
-    await interaction.response.defer()
-    qr = qrcode.QRCode(border=2, box_size=10)
-    qr.add_data(texto)
-    qr.make(fit=True)
-    img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
-    await interaction.followup.send(file=_to_file(img, "qr.png"))
-
-
-@bot.tree.command(name="color", description="Muestra una muestra de color a partir de un código HEX")
-@app_commands.describe(hex_code="Código de color, ej: #FF0000 o FF0000")
-async def cmd_color(interaction: discord.Interaction, hex_code: str):
-    h = hex_code.strip().lstrip("#")
-    if len(h) != 6 or any(c not in "0123456789abcdefABCDEF" for c in h):
-        return await interaction.response.send_message(f"{E_WARN} Código HEX inválido. Ej: `#FF0000`", ephemeral=True)
-    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
-    img = Image.new("RGB", (300, 300), (r, g, b))
-    e = discord.Embed(description=f"HEX: `#{h.upper()}`\nRGB: `({r}, {g}, {b})`", color=discord.Color(int(h, 16)))
-    e.set_thumbnail(url="attachment://color.png")
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e, file=_to_file(img.convert("RGBA"), "color.png"))
-
-
-# ── UTILIDAD EXTRA (web) ─────────────────────────────────────────────
 
 @bot.tree.command(name="membercount", description="Cuántos miembros tiene el servidor")
 async def cmd_membercount(interaction: discord.Interaction):
@@ -2649,125 +2559,6 @@ async def cmd_botinfo(interaction: discord.Interaction):
     e.add_field(name="Prefijo por nombre", value=f"`{BOT_NAME}` o `{BOT_TRIGGER}`", inline=False)
     e.set_footer(text=_footer(), icon_url=URL_REDPT)
     await interaction.response.send_message(embed=e)
-
-@bot.tree.command(name="invite", description="Genera un link de invitación del servidor")
-async def cmd_invite(interaction: discord.Interaction):
-    try:
-        invite = await interaction.channel.create_invite(max_age=86400, reason=f"Pedido por {interaction.user}")
-        await interaction.response.send_message(
-            embed=discord.Embed(description=f"{E_CHECK} {invite.url}", color=C_RED), ephemeral=True)
-    except discord.Forbidden:
-        await interaction.response.send_message(f"{E_WARN} No tengo permiso para crear invitaciones.", ephemeral=True)
-
-@bot.tree.command(name="firstmessage", description="Salta al primer mensaje del canal")
-async def cmd_firstmessage(interaction: discord.Interaction):
-    await interaction.response.defer()
-    async for msg in interaction.channel.history(limit=1, oldest_first=True):
-        return await interaction.followup.send(
-            embed=discord.Embed(description=f"{E_ARROW} [Primer mensaje]({msg.jump_url}) — por {msg.author.mention}",
-                                color=C_RED))
-    await interaction.followup.send(f"{E_WARN} No encontré mensajes.")
-
-@bot.tree.command(name="define", description="Busca la definición de una palabra (inglés)")
-@app_commands.describe(palabra="Palabra a buscar")
-async def cmd_define(interaction: discord.Interaction, palabra: str):
-    await interaction.response.defer()
-    loop = asyncio.get_running_loop()
-    try:
-        r = await loop.run_in_executor(None, lambda: requests.get(
-            f"https://api.dictionaryapi.dev/api/v2/entries/en/{quote(palabra)}", timeout=8))
-        data = r.json()
-        if not isinstance(data, list): raise ValueError("no results")
-        meaning = data[0]["meanings"][0]
-        definition = meaning["definitions"][0]["definition"]
-        pos = meaning.get("partOfSpeech", "")
-        e = discord.Embed(description=f"**{palabra}** *({pos})*\n{definition}", color=C_RED)
-        e.set_footer(text=_footer(), icon_url=URL_REDPT)
-        await interaction.followup.send(embed=e)
-    except Exception:
-        await interaction.followup.send(f"{E_WARN} No encontré una definición para `{palabra}`.")
-
-@bot.tree.command(name="shorten", description="Acorta una URL")
-@app_commands.describe(url="Enlace a acortar")
-async def cmd_shorten(interaction: discord.Interaction, url: str):
-    await interaction.response.defer()
-    loop = asyncio.get_running_loop()
-    try:
-        r = await loop.run_in_executor(None, lambda: requests.get(
-            "https://is.gd/create.php", params={"format": "simple", "url": url}, timeout=8))
-        if not r.text.startswith("http"): raise ValueError(r.text)
-        e = discord.Embed(description=f"{E_CHECK} {r.text.strip()}", color=C_RED)
-        e.set_footer(text=_footer(), icon_url=URL_REDPT)
-        await interaction.followup.send(embed=e)
-    except Exception:
-        await interaction.followup.send(f"{E_WARN} No pude acortar ese enlace.")
-
-@bot.tree.command(name="weather", description="Ver el clima de una ciudad")
-@app_commands.describe(ciudad="Nombre de la ciudad")
-async def cmd_weather(interaction: discord.Interaction, ciudad: str):
-    await interaction.response.defer()
-    loop = asyncio.get_running_loop()
-    try:
-        r = await loop.run_in_executor(None, lambda: requests.get(
-            f"https://wttr.in/{quote(ciudad)}", params={"format": "3"}, timeout=8))
-        e = discord.Embed(description=f"🌤️ {r.text.strip()}", color=C_RED)
-        e.set_footer(text=_footer(), icon_url=URL_REDPT)
-        await interaction.followup.send(embed=e)
-    except Exception:
-        await interaction.followup.send(f"{E_WARN} No pude obtener el clima de `{ciudad}`.")
-
-@bot.tree.command(name="translate", description="Traduce un texto")
-@app_commands.describe(texto="Texto a traducir", idioma_destino="Código de idioma, ej: en, es, fr")
-async def cmd_translate(interaction: discord.Interaction, texto: str, idioma_destino: str = "en"):
-    await interaction.response.defer()
-    loop = asyncio.get_running_loop()
-    try:
-        r = await loop.run_in_executor(None, lambda: requests.get(
-            "https://api.mymemory.translated.net/get",
-            params={"q": texto, "langpair": f"auto|{idioma_destino}"}, timeout=8))
-        data = r.json()
-        translated = data["responseData"]["translatedText"]
-        e = discord.Embed(color=C_RED)
-        e.add_field(name="Original", value=texto[:500], inline=False)
-        e.add_field(name=f"Traducido ({idioma_destino})", value=translated[:500], inline=False)
-        e.set_footer(text=_footer(), icon_url=URL_REDPT)
-        await interaction.followup.send(embed=e)
-    except Exception:
-        await interaction.followup.send(f"{E_WARN} No pude traducir ese texto.")
-
-
-SUGGESTION_FILE_CFG = "suggest_channel"
-
-@bot.tree.command(name="suggest-setup", description="Define el canal de sugerencias (Admin)")
-@app_commands.describe(canal="Canal donde se publicarán las sugerencias")
-@app_commands.checks.has_permissions(administrator=True)
-async def cmd_suggest_setup(interaction: discord.Interaction, canal: discord.TextChannel):
-    _gc(interaction.guild_id)[SUGGESTION_FILE_CFG] = canal.id
-    _save_gc()
-    await interaction.response.send_message(
-        embed=discord.Embed(description=f"{E_CHECK} Sugerencias en {canal.mention}", color=C_RED), ephemeral=True)
-
-@cmd_suggest_setup.error
-async def _suggest_setup_err(i, e):
-    if isinstance(e, app_commands.MissingPermissions):
-        await i.response.send_message(f"{E_WARN} Necesitas **Administrador**.", ephemeral=True)
-
-@bot.tree.command(name="suggest", description="Envía una sugerencia para el servidor")
-@app_commands.describe(texto="Tu sugerencia")
-async def cmd_suggest(interaction: discord.Interaction, texto: str):
-    ch_id = _gc(interaction.guild_id).get(SUGGESTION_FILE_CFG)
-    channel = interaction.guild.get_channel(ch_id) if ch_id else interaction.channel
-    if channel is None:
-        return await interaction.response.send_message(f"{E_WARN} Canal de sugerencias no válido.", ephemeral=True)
-    e = discord.Embed(description=texto, color=C_RED, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"💡 Sugerencia de {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    msg = await channel.send(embed=e)
-    for r in ("👍", "👎"):
-        try: await msg.add_reaction(r)
-        except Exception: pass
-    await interaction.response.send_message(f"{E_CHECK} Sugerencia enviada en {channel.mention}", ephemeral=True)
-
 
 # ── GESTIÓN DE SERVIDOR ──────────────────────────────────────────────
 
@@ -2873,65 +2664,6 @@ async def cmd_roleinfo(interaction: discord.Interaction, rol: discord.Role):
     e.set_footer(text=_footer(), icon_url=URL_REDPT)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="emojilist", description="Lista los emojis personalizados del servidor")
-async def cmd_emojilist(interaction: discord.Interaction):
-    emojis = interaction.guild.emojis
-    if not emojis:
-        return await interaction.response.send_message(f"{E_WARN} Este servidor no tiene emojis personalizados.", ephemeral=True)
-    txt = " ".join(str(em) for em in emojis[:80])
-    e = discord.Embed(description=txt, color=C_RED)
-    e.set_author(name=f"{BOT_NAME} — 😀 Emojis ({len(emojis)})", icon_url=URL_CROWN)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e)
-
-@bot.tree.command(name="banner", description="Muestra el banner del servidor")
-async def cmd_banner(interaction: discord.Interaction):
-    g = interaction.guild
-    if not g.banner:
-        return await interaction.response.send_message(f"{E_WARN} Este servidor no tiene banner.", ephemeral=True)
-    e = discord.Embed(color=C_RED)
-    e.set_author(name=f"{BOT_NAME} — 🖼️ Banner de {g.name}", icon_url=URL_CROWN)
-    e.set_image(url=g.banner.url)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e)
-
-@bot.tree.command(name="report", description="Reporta a un usuario a los moderadores")
-@app_commands.describe(usuario="Usuario a reportar", razon="Motivo del reporte")
-async def cmd_report(interaction: discord.Interaction, usuario: discord.Member, razon: str):
-    cfg = _gc(interaction.guild_id)
-    log_id = cfg.get("mod_log")
-    channel = interaction.guild.get_channel(log_id) if log_id else None
-    if channel is None:
-        return await interaction.response.send_message(
-            f"{E_WARN} No hay un canal de logs configurado (`/setmodlog`), avisa a un admin directamente.",
-            ephemeral=True)
-    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"🚨 Reporte de {interaction.user.display_name}", icon_url=interaction.user.display_avatar.url)
-    e.add_field(name="Usuario reportado", value=usuario.mention, inline=True)
-    e.add_field(name="Canal", value=interaction.channel.mention, inline=True)
-    e.add_field(name="Motivo", value=razon, inline=False)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await channel.send(embed=e)
-    await interaction.response.send_message(f"{E_CHECK} Reporte enviado a los moderadores.", ephemeral=True)
-
-@bot.tree.command(name="audit-log", description="Muestra las últimas acciones del registro de auditoría (Admin)")
-@app_commands.checks.has_permissions(view_audit_log=True)
-async def cmd_audit_log(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    lines = []
-    async for entry in interaction.guild.audit_logs(limit=8):
-        lines.append(f"`{entry.action.name}` — {entry.user} → {entry.target} • "
-                     f"{discord.utils.format_dt(entry.created_at, 'R')}")
-    e = discord.Embed(description="\n".join(lines) or "Sin registros.", color=C_RED)
-    e.set_author(name=f"{BOT_NAME} — 📜 Audit Log", icon_url=URL_CROWN)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.followup.send(embed=e, ephemeral=True)
-
-@cmd_audit_log.error
-async def _audit_err(i, e):
-    if isinstance(e, app_commands.MissingPermissions):
-        await i.response.send_message(f"{E_WARN} Necesitas **Ver registro de auditoría**.", ephemeral=True)
-
 
 # ── STARBOARD ─────────────────────────────────────────────────────────
 
@@ -2988,34 +2720,6 @@ async def _handle_starboard_reaction(payload: discord.RawReactionActionEvent):
     _save_star()
 
 
-@bot.tree.command(name="starboard-setup", description="Configura el starboard (Admin)")
-@app_commands.describe(canal="Canal donde se publicarán los mensajes destacados",
-                        umbral="Cantidad de reacciones necesarias (por defecto 3)",
-                        emoji="Emoji a contar (por defecto ⭐)")
-@app_commands.checks.has_permissions(administrator=True)
-async def cmd_starboard_setup(interaction: discord.Interaction, canal: discord.TextChannel,
-                               umbral: app_commands.Range[int, 1, 50] = 3, emoji: str = "⭐"):
-    cfg = _gc(interaction.guild_id)
-    cfg["star_channel"], cfg["star_threshold"], cfg["star_emoji"] = canal.id, umbral, emoji
-    _save_gc()
-    e = discord.Embed(
-        description=f"{E_CHECK} Starboard activo en {canal.mention}\nUmbral: `{umbral}` {emoji}",
-        color=C_RED)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e, ephemeral=True)
-
-@bot.tree.command(name="starboard-off", description="Desactiva el starboard (Admin)")
-@app_commands.checks.has_permissions(administrator=True)
-async def cmd_starboard_off(interaction: discord.Interaction):
-    cfg = _gc(interaction.guild_id)
-    cfg["star_channel"] = None
-    _save_gc()
-    await interaction.response.send_message(
-        embed=discord.Embed(description=f"{E_CHECK} Starboard desactivado.", color=C_RED), ephemeral=True)
-
-for _c in (cmd_starboard_setup, cmd_starboard_off):
-    _c.error(_admin_perm_error)
-
 
 # ── MINIJUEGOS / DIVERSIÓN AVANZADA ──────────────────────────────────
 
@@ -3061,41 +2765,6 @@ class TriviaView(View):
     @discord.ui.button(label="D", style=discord.ButtonStyle.primary)
     async def d(self, i, _): await self._answer(i, 3)
 
-@bot.tree.command(name="trivia", description="Responde una pregunta de trivia")
-async def cmd_trivia(interaction: discord.Interaction):
-    q, options, correct = random.choice(_TRIVIA_BANK)
-    letters = ["A", "B", "C", "D"]
-    desc = "\n".join(f"**{letters[i]}.** {opt}" for i, opt in enumerate(options))
-    e = discord.Embed(description=f"**{q}**\n\n{desc}", color=C_RED)
-    e.set_author(name=f"{BOT_NAME} — 🧠 Trivia", icon_url=URL_CROWN)
-    e.set_footer(text="Tienes 20 segundos para responder.")
-    await interaction.response.send_message(embed=e, view=TriviaView(correct, interaction.user.id))
-
-@bot.tree.command(name="ship", description="Calcula la compatibilidad entre dos usuarios 💘")
-@app_commands.describe(usuario1="Primer usuario", usuario2="Segundo usuario")
-async def cmd_ship(interaction: discord.Interaction, usuario1: discord.Member, usuario2: discord.Member):
-    seed = usuario1.id + usuario2.id
-    pct = seed % 101
-    bar_filled = "❤️" * (pct // 10)
-    bar_empty = "🖤" * (10 - pct // 10)
-    e = discord.Embed(
-        description=(f"**{usuario1.display_name}** 💘 **{usuario2.display_name}**\n\n"
-                     f"{bar_filled}{bar_empty}\n**{pct}%** de compatibilidad"),
-        color=C_RED)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e)
-
-@bot.tree.command(name="mock", description="sPoNgEbOb CaSe a tu texto")
-@app_commands.describe(texto="Texto a transformar")
-async def cmd_mock(interaction: discord.Interaction, texto: str):
-    out = "".join(c.upper() if i % 2 == 0 else c.lower() for i, c in enumerate(texto))
-    await interaction.response.send_message(out[:2000])
-
-@bot.tree.command(name="reverse", description="Invierte un texto")
-@app_commands.describe(texto="Texto a invertir")
-async def cmd_reverse(interaction: discord.Interaction, texto: str):
-    await interaction.response.send_message(texto[::-1][:2000])
-
 @bot.tree.command(name="choose", description="Elige aleatoriamente entre varias opciones")
 @app_commands.describe(opciones="Opciones separadas por ; (ej: pizza;sushi;tacos)")
 async def cmd_choose(interaction: discord.Interaction, opciones: str):
@@ -3104,15 +2773,6 @@ async def cmd_choose(interaction: discord.Interaction, opciones: str):
         return await interaction.response.send_message(f"{E_WARN} Dame al menos 2 opciones separadas por `;`.", ephemeral=True)
     pick = random.choice(items)
     e = discord.Embed(description=f"{E_ARROW} Elijo: **{pick}**", color=C_RED)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e)
-
-@bot.tree.command(name="rate", description="Le pone puntaje a lo que quieras, del 1 al 10")
-@app_commands.describe(cosa="Qué quieres que califique")
-async def cmd_rate(interaction: discord.Interaction, cosa: str):
-    score = (sum(ord(c) for c in cosa.lower()) % 10) + 1
-    e = discord.Embed(description=f"Le doy a **{cosa}** un **{score}/10** {'🔥' if score >= 8 else '👍' if score >=5 else '😬'}",
-                      color=C_RED)
     e.set_footer(text=_footer(), icon_url=URL_REDPT)
     await interaction.response.send_message(embed=e)
 
@@ -3151,35 +2811,6 @@ async def cmd_calc(interaction: discord.Interaction, expresion: str):
         await interaction.response.send_message(
             f"{E_WARN} Expresión inválida. Solo se permiten números y `+ - * / % ** ()`.", ephemeral=True)
 
-
-@bot.tree.command(name="base64", description="Codifica o decodifica texto en Base64")
-@app_commands.describe(accion="encode o decode", texto="Texto a procesar")
-@app_commands.choices(accion=[
-    app_commands.Choice(name="Codificar (encode)", value="encode"),
-    app_commands.Choice(name="Decodificar (decode)", value="decode")])
-async def cmd_base64(interaction: discord.Interaction, accion: app_commands.Choice[str], texto: str):
-    try:
-        if accion.value == "encode":
-            result = base64.b64encode(texto.encode()).decode()
-        else:
-            result = base64.b64decode(texto.encode()).decode()
-    except Exception:
-        return await interaction.response.send_message(f"{E_WARN} No pude procesar ese texto.", ephemeral=True)
-    e = discord.Embed(description=f"```{result[:1500]}```", color=C_RED)
-    e.set_footer(text=_footer(), icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e)
-
-@bot.tree.command(name="hash", description="Genera el hash de un texto")
-@app_commands.describe(texto="Texto a hashear", algoritmo="Algoritmo a usar")
-@app_commands.choices(algoritmo=[
-    app_commands.Choice(name="MD5", value="md5"),
-    app_commands.Choice(name="SHA1", value="sha1"),
-    app_commands.Choice(name="SHA256", value="sha256")])
-async def cmd_hash(interaction: discord.Interaction, texto: str, algoritmo: app_commands.Choice[str]):
-    h = hashlib.new(algoritmo.value, texto.encode()).hexdigest()
-    e = discord.Embed(description=f"```{h}```", color=C_RED)
-    e.set_footer(text=f"{algoritmo.name} • {_footer()}", icon_url=URL_REDPT)
-    await interaction.response.send_message(embed=e)
 
 
 # ── RECORDATORIOS PERSISTENTES ───────────────────────────────────────
@@ -3546,14 +3177,16 @@ async def cmd_help(interaction: discord.Interaction):
     e.set_author(name=f"{BOT_NAME} — Comandos", icon_url=URL_CROWN)
     e.set_thumbnail(url=URL_CROWN)
     e.description = (_t(interaction.guild_id, "help_intro", trigger=BOT_TRIGGER, name=BOT_NAME) +
-                     f"\n{E_ARROW} Cambia el idioma del bot con `/language` (Español/English).")
+                     f"\n{E_ARROW} Cambia el idioma del bot con `/language` (Español/English).\n"
+                     f"{E_INFO} Algunos extras (trivia, ship, mock, reverse, rate) solo están por texto: "
+                     f"`{BOT_TRIGGER} trivia`, `{BOT_TRIGGER} ship @u1 @u2`, etc.")
     e.add_field(
         name=f"{E_RDIAM} Bypass",
         value="`/bypass` `/setautobypass` *(Admin)*",
         inline=True)
     e.add_field(
         name=f"{E_CROWN} Fun",
-        value="`/8ball` `/joke` `/coinflip` `/roll` `/roast` `/rps` `/say`",
+        value="`/8ball` `/joke` `/coinflip` `/roll` `/roast` `/rps` `/say` `/choose` *(Manage Msgs para /say)*",
         inline=True)
     e.add_field(
         name=f"{E_TICKET} Tickets",
@@ -3561,17 +3194,16 @@ async def cmd_help(interaction: discord.Interaction):
         inline=True)
     e.add_field(
         name="🎉 Giveaways",
-        value="`/giveaway-start` (te deja personalizar imagen/miniatura/título antes de publicar) "
+        value="`/giveaway-start` (deja personalizar imagen/miniatura/título antes de publicar) "
               "`/giveaway-end` `/giveaway-reroll` `/giveaway-cancel` `/giveaway-list` *(Manage Server)*",
         inline=True)
     e.add_field(
         name="🛡️ Moderación",
-        value="`/kick` `/ban` `/unban` `/timeout` `/untimeout` `/warn` `/warnings` `/clear-warnings` "
-              "`/clear` `/purge-user` `/purge-bots` `/purge-contains`",
+        value="`/kick` `/ban` `/unban` `/timeout` `/untimeout` `/warn` `/warnings` `/clear-warnings` `/clear`",
         inline=True)
     e.add_field(
         name="🤖 AutoMod y Logs",
-        value="`/automod-toggle` `/automod-addword` `/automod-removeword` `/automod-words` "
+        value="`/automod-toggle` `/automod-addword` `/automod-removeword` "
               "`/setmodlog` `/snipe` `/editsnipe` *(Admin)*",
         inline=True)
     e.add_field(
@@ -3590,20 +3222,15 @@ async def cmd_help(interaction: discord.Interaction):
     e.add_field(
         name="🖼️ Imágenes",
         value="`/pfp-circle` `/pfp-invert` `/pfp-grayscale` `/pfp-blur` `/pfp-pixelate` "
-              "`/jail` `/wanted` `/meme` `/qr` `/color`",
+              "`/jail` `/wanted` `/meme`",
         inline=True)
     e.add_field(
         name="🧩 Extras",
-        value="`/poll` `/remind` `/remindlist` `/afk` `/suggest` `/suggest-setup` *(Admin)*",
+        value="`/poll` `/remind` `/remindlist` `/afk`",
         inline=True)
     e.add_field(
         name="⚙️ Gestión de servidor",
-        value="`/lock` `/unlock` `/slowmode` `/nickname` `/nuke` `/channelinfo` `/roleinfo` "
-              "`/emojilist` `/banner` `/report` `/audit-log`",
-        inline=True)
-    e.add_field(
-        name="🌟 Starboard",
-        value="`/starboard-setup` `/starboard-off` *(Admin)*",
+        value="`/lock` `/unlock` `/slowmode` `/nickname` `/nuke` `/channelinfo` `/roleinfo`",
         inline=True)
     e.add_field(
         name="🔐 Seguridad",
@@ -3611,17 +3238,13 @@ async def cmd_help(interaction: discord.Interaction):
               "`/lockdown` `/unlockdown` `/security-status` *(Admin)*",
         inline=True)
     e.add_field(
-        name="🎮 Minijuegos",
-        value="`/trivia` `/ship` `/mock` `/reverse` `/choose` `/rate`",
-        inline=True)
-    e.add_field(
         name="🔧 Utilidad avanzada",
-        value="`/calc` `/base64` `/hash`",
+        value="`/calc`",
         inline=True)
     e.add_field(
         name=f"{E_ARROW} Utilidad",
-        value="`/ping` `/avatar` `/userinfo` `/serverinfo` `/membercount` `/botinfo` `/invite` "
-              "`/firstmessage` `/define` `/shorten` `/weather` `/translate` `/language` *(Admin)* `/help`",
+        value="`/ping` `/avatar` `/userinfo` `/serverinfo` `/membercount` `/botinfo` "
+              "`/language` *(Admin)* `/help`",
         inline=True)
     e.set_image(url=IMG_MAIN)
     e.set_footer(text=f"SYSTEM MADE WITH 🔥  |  {_footer()}", icon_url=URL_REDPT)
