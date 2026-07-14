@@ -267,10 +267,14 @@ def _extract(data: dict) -> str | None:
 
 def _bypass_sync(url: str) -> tuple[str | None, str | None]:
     """
-    Llama a KING API y devuelve (destination, error).
-    - Extrae `destination` directamente (campo principal de KING API v4.0.0).
-    - Maneja 429 Rate Limit con espera y reintento.
-    - 3 reintentos ante errores de red.
+    Llama a KING API v5.0.0 y devuelve (destination, error).
+
+    Códigos que maneja:
+      200              → éxito, lee campo 'destination'
+      400              → bypass falló, lee campo 'message'  (nunca 422)
+      429              → rate limit, espera Retry-After y reintenta
+      500              → error interno de la API
+      red / timeout    → reintenta hasta BYPASS_RETRIES veces
     """
     last_err = "Error desconocido"
     for attempt in range(1, BYPASS_RETRIES + 1):
@@ -279,60 +283,68 @@ def _bypass_sync(url: str) -> tuple[str | None, str | None]:
                 BYPASS_API_URL + quote(url, safe=""),
                 timeout=BYPASS_TIMEOUT,
             )
+            code = resp.status_code
 
-            # 429 — Rate limit de KING API: esperar y reintentar
-            if resp.status_code == 429:
+            # ── 429 Rate limit ──────────────────────────────────────────
+            if code == 429:
                 retry_after = int(resp.headers.get("Retry-After", BYPASS_DELAY))
-                logger.warning("KING API rate limit — esperando %ds", retry_after)
+                logger.warning("KING API 429 — esperando %ds (intento %d)", retry_after, attempt)
                 time.sleep(retry_after)
-                continue
+                continue  # no cuenta como intento fallido
 
-            # Otro error HTTP
-            if resp.status_code != 200:
-                last_err = f"HTTP {resp.status_code}"
-                if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
-                return None, last_err
-
-            # Parsear JSON
+            # ── Parsear JSON (siempre esperable de KING API v5) ─────────
             try:
                 data = resp.json()
             except Exception:
                 txt = resp.text.strip()
                 if txt.startswith("http"):
                     return txt, None
-                last_err = "Respuesta inválida (no es JSON)"
+                last_err = f"Respuesta no-JSON (HTTP {code})"
+                logger.warning("KING API respuesta no-JSON intento %d: %s", attempt, txt[:80])
                 if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
                 return None, last_err
 
-            # KING API v4.0.0: { success: bool, destination: str, message: str }
-            if isinstance(data, dict):
-                if data.get("success") is True:
+            # ── 200 OK ──────────────────────────────────────────────────
+            if code == 200:
+                if isinstance(data, dict) and data.get("success") is True:
                     dst = data.get("destination", "")
                     if dst and dst.startswith("http"):
                         return dst, None
-                    # success=true pero sin destination — intentar extracción genérica
                     fallback = _extract(data)
                     if fallback:
                         return fallback, None
-                    return None, "La API respondió OK pero no envió destino"
+                    return None, "API respondió OK pero sin campo 'destination'"
 
-                if data.get("success") is False:
-                    last_err = data.get("message") or data.get("error") or "Sin resultado"
-                    if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
-                    return None, last_err
+            # ── 400 bypass falló (KING API v5 usa 400, no 422) ─────────
+            if code in (400, 422):
+                msg = ""
+                if isinstance(data, dict):
+                    msg = data.get("message") or data.get("error") or ""
+                last_err = msg or f"Bypass fallido (HTTP {code})"
+                logger.info("KING API %d: %s", code, last_err)
+                # No reintentar — el bypass ya se procesó y falló
+                return None, last_err
 
-            # Respuesta sin campo success — extracción genérica
-            dst = _extract(data)
-            if dst:
-                return dst, None
-            return None, "Sin resultado en la respuesta"
+            # ── 500 error interno ───────────────────────────────────────
+            if code == 500:
+                last_err = "Error interno de KING API (500)"
+                logger.error("KING API 500 intento %d — %s", attempt, url[:60])
+                if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
+                return None, last_err
+
+            # ── Otro código inesperado ─────────────────────────────────
+            last_err = f"HTTP {code} inesperado"
+            logger.warning("KING API código inesperado %d intento %d", code, attempt)
+            if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY); continue
+            return None, last_err
 
         except requests.exceptions.Timeout:
             last_err = f"Timeout ({BYPASS_TIMEOUT}s)"
+            logger.warning("KING API timeout intento %d: %s", attempt, url[:60])
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
         except Exception as ex:
             last_err = str(ex)[:120]
-            logger.warning("_bypass_sync error intento %d: %s", attempt, last_err)
+            logger.warning("_bypass_sync excepción intento %d: %s", attempt, last_err)
             if attempt < BYPASS_RETRIES: time.sleep(BYPASS_DELAY)
 
     return None, last_err
