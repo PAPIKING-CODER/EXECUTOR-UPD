@@ -10,6 +10,7 @@ except ImportError:
 
 import os, re, json, time, asyncio, logging, threading, random, string, ast, operator, base64, hashlib
 from datetime import datetime, timezone, timedelta
+from collections import deque
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from logging.handlers import RotatingFileHandler
 from urllib.parse import quote
@@ -49,10 +50,34 @@ BOT_CREDIT = "BY KING"
 # Cambialo con la variable de entorno BOT_TRIGGER si quieres otra palabra.
 BOT_TRIGGER = os.environ.get("BOT_TRIGGER", "fmd")
 
-BYPASS_API_URL = "https://4pi-bypass.vercel.app/api/bypass?url="
+BYPASS_API_URL = "http://fi8.bot-hosting.net:21163/freeapibypass?url="
+SUPPORTED_ENDPOINT = "http://fi8.bot-hosting.net:21163/supported"
 BYPASS_TIMEOUT = 30
 BYPASS_RETRIES = 3
 BYPASS_DELAY   = 3
+
+# ── RATE LIMIT GLOBAL para Banana API ──────────────────────────────
+# Máximo 4 peticiones cada 10s EN TODO EL BOT (no por usuario). Si se excede,
+# Banana API banea la IP/key de forma PERMANENTE, así que esto se aplica en
+# el único punto donde de verdad se llama a la API — cada intento (incluidos
+# los reintentos) pasa por aquí antes de disparar la petición HTTP. Es
+# thread-safe porque _bypass_sync corre en threads del executor.
+BANANA_RATE_MAX = 4
+BANANA_RATE_WINDOW = 10.0
+_rl_lock = threading.Lock()
+_rl_times = deque()
+
+def _rate_limit_wait():
+    while True:
+        with _rl_lock:
+            now = time.time()
+            while _rl_times and now - _rl_times[0] >= BANANA_RATE_WINDOW:
+                _rl_times.popleft()
+            if len(_rl_times) < BANANA_RATE_MAX:
+                _rl_times.append(now)
+                return
+            wait = BANANA_RATE_WINDOW - (now - _rl_times[0]) + 0.05
+        time.sleep(wait)
 BYPASS_COOLDOWN = 12          # segundos de espera por usuario entre bypasses
 BYPASS_AUTODELETE = 120       # segundos antes de borrar el mensaje de resultado
 _bypass_cooldowns: dict = {}  # user_id -> timestamp del último bypass
@@ -260,6 +285,7 @@ def _bypass_sync(url: str):
     last_err = "Error desconocido"
     for attempt in range(1, BYPASS_RETRIES + 1):
         try:
+            _rate_limit_wait()  # nunca más de 4 peticiones cada 10s a Banana API
             resp = _http.get(BYPASS_API_URL + quote(url, safe=""), timeout=BYPASS_TIMEOUT)
             if resp.status_code != 200:
                 last_err = f"HTTP {resp.status_code}"
@@ -635,6 +661,33 @@ async def _ae(i, e):
     if isinstance(e, app_commands.MissingPermissions):
         await i.response.send_message(
             f"{E_WARN} Necesitas **Administrador**.", ephemeral=True)
+
+@bot.tree.command(name="supported", description="📋 Lista de servicios soportados para bypass")
+async def cmd_supported(interaction: discord.Interaction):
+    await interaction.response.defer()
+    loop = asyncio.get_running_loop()
+    try:
+        resp = await loop.run_in_executor(None, lambda: _http.get(SUPPORTED_ENDPOINT, timeout=10))
+        data = resp.json()
+        services = data.get("services") or data.get("supported") or (data if isinstance(data, list) else [])
+    except Exception as ex:
+        logger.warning(f"/supported: {ex}")
+        return await interaction.followup.send(
+            f"{E_WARN} No pude obtener la lista de servicios soportados ahora mismo.")
+
+    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — 📋 Servicios soportados", icon_url=URL_CROWN)
+    if services:
+        lista = "\n".join(f"• {s}" for s in services[:30])
+        e.description = f"**Total:** {len(services)}\n\n{lista}"
+        if len(services) > 30:
+            e.set_footer(text=f"Y {len(services) - 30} más...  •  {_footer()}", icon_url=URL_REDPT)
+        else:
+            e.set_footer(text=_footer(), icon_url=URL_REDPT)
+    else:
+        e.description = f"{E_WARN} No se pudo leer la lista de servicios."
+        e.set_footer(text=_footer(), icon_url=URL_REDPT)
+    await interaction.followup.send(embed=e)
 
 # ── SLASH — FUN ───────────────────────────────────────────────────
 
@@ -3182,7 +3235,7 @@ async def cmd_help(interaction: discord.Interaction):
                      f"`{BOT_TRIGGER} trivia`, `{BOT_TRIGGER} ship @u1 @u2`, etc.")
     e.add_field(
         name=f"{E_RDIAM} Bypass",
-        value="`/bypass` `/setautobypass` *(Admin)*",
+        value="`/bypass` `/setautobypass` *(Admin)* `/supported`",
         inline=True)
     e.add_field(
         name=f"{E_CROWN} Fun",
