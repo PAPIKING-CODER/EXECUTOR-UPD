@@ -1,5 +1,4 @@
-FMD BOT — Bypass + Fun Commands
-"""
+# FMD BOT — Bypass + Fun Commands
 import sys, types
 
 try:
@@ -294,7 +293,6 @@ def _bypass_sync(url: str):
                 return None, last_err
 
             if not result:
-                # Si success es True pero no hay resultado, buscar cualquier valor que sea URL
                 if isinstance(data, dict) and data.get("success") is True:
                     for v in data.values():
                         if isinstance(v, str) and v.startswith(("http://", "https://")):
@@ -2165,9 +2163,9 @@ async def _handle_member_join(member: discord.Member):
                     le = discord.Embed(
                         description=f"⚠️ AntiRaid marcó a {member.mention} como sospechoso (cuenta de {age_days} día(s))",
                         color=C_RED, timestamp=datetime.now(timezone.utc))
-                    le.set_footer(text=_footer(), icon_url=URL_REDPT)
-                    try: await log_ch.send(embed=le)
-                    except Exception: pass
+                        le.set_footer(text=_footer(), icon_url=URL_REDPT)
+                        try: await log_ch.send(embed=le)
+                        except Exception: pass
 
     unverified_id = cfg.get("unverified_role")
     if unverified_id:
