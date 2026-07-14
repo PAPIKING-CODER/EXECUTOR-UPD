@@ -14,7 +14,6 @@ import discord
 from discord import app_commands
 from discord.ui import Button, View
 import requests
-import aiohttp
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -47,19 +46,13 @@ VPS_BYPASS_RETRY_DELAY = 3
 
 AUTOBYPASS_CHANNELS_FILE = "autobypass_channels.json"
 
-# ── COLORES Y ESTILOS ──────────────────────────────────────────
-C_RED   = 0xC80000   # Rojo oscuro principal
-C_WARN  = 0xFF4500   # Naranja para carga
-C_ERROR = 0xED4245   # Rojo estándar de Discord
-
-# ── TUS EMOJIS Y GIFS (URLs directas) ─────────────────────────
-URL_VERIFIED = "https://cdn.discordapp.com/emojis/1511381303872716820.webp?size=100&animated=true"
-URL_LOADING  = "https://cdn.discordapp.com/emojis/1254460771883028661.webp?size=100&animated=true"
-URL_KEY      = "https://cdn.discordapp.com/emojis/1483938936253317371.webp?size=100"
-URL_CLOCK    = "https://cdn.discordapp.com/emojis/1525380296852377711.webp?size=100&animated=true"
-URL_CROWN    = "https://cdn.discordapp.com/emojis/1461735621985833061.webp?size=100&animated=true"
-URL_NO       = "https://cdn.discordapp.com/emojis/1399216286353064028.webp?size=100"
-URL_MAIN_GIF = "https://cdn.discordapp.com/attachments/1525427252400099381/1525750876155805847/ezgif-37d313baab956afc.gif?ex=6a57d17b&is=6a567ffb&hm=7c1a8b24541be5b90396964acf5480a6802bdd2c6bb4600dfac870013575af0e&"
+# ── URLs DE TUS NUEVOS EMOJIS E IMÁGENES ─────────────────────────
+URL_GREEN_DOT = "https://cdn.discordapp.com/emojis/1425942717208199389.webp?size=100&animated=true"
+URL_THUMBNAIL = "https://cdn.discordapp.com/emojis/1511381348433264851.webp?size=100&animated=true"
+URL_CLOCK     = "https://cdn.discordapp.com/emojis/1525380296852377711.webp?size=100&animated=true"
+URL_KEY       = "https://cdn.discordapp.com/emojis/1525381310200414310.webp?size=100"
+URL_SUCCESS   = "https://cdn.discordapp.com/emojis/1525379448768303207.webp?size=100&animated=true"
+URL_MAIN_GIF  = "https://cdn.discordapp.com/attachments/1525427252400099381/1525750876155805847/ezgif-37d313baab956afc.gif?ex=6a57d17b&is=6a567ffb&hm=7c1a8b24541be5b90396964acf5480a6802bdd2c6bb4600dfac870013575af0e&"
 
 # ── HELPERS ──────────────────────────────────────────────────────
 BOT_START_TIME = datetime.now(timezone.utc)
@@ -78,7 +71,7 @@ def _footer(extra: str = "") -> str:
     base = f"Made with 💪 by {BOT_CREDIT} • {BOT_NAME}"
     return f"{base} - {extra}" if extra else base
 
-# ── BYPASS ENGINE (Estructura Robusta) ─────────────────────────
+# ── BYPASS ENGINE ──────────────────────────────────────────────
 _http_session = requests.Session()
 _http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
 
@@ -189,33 +182,36 @@ def save_json(path, data):
 
 autobypass_channels = load_json(AUTOBYPASS_CHANNELS_FILE, set())
 
-# ── EMBEDS ──────────────────────────────────────────────────────
+# ── EMBEDS (Diseño Verde) ──────────────────────────────────────
 def embed_loading() -> discord.Embed:
-    e = discord.Embed(color=C_WARN, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="PROCESSING BYPASS...", icon_url=URL_LOADING)
-    e.set_thumbnail(url=URL_LOADING)
+    e = discord.Embed(color=0xFFA500, timestamp=datetime.now(timezone.utc))
+    e.set_author(name="PROCESSING BYPASS...", icon_url=URL_GREEN_DOT)
+    e.set_thumbnail(url=URL_THUMBNAIL)
     e.description = "⏳ Bypass en proceso, espera un momento..."
     e.set_footer(text=_footer())
     return e
 
 def embed_success(result: str, elapsed: float, user: discord.User) -> discord.Embed:
-    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BYPASS • Success", icon_url=URL_VERIFIED)
-    e.set_thumbnail(url=URL_KEY)
-    e.add_field(name="🔑 RESULT:", value=f"```txt\n{result[:900]}\n```", inline=False)
-    e.add_field(name="⏰ TIME:", value=f"`{elapsed:.2f}s`", inline=False)
-    e.add_field(name="👤 REQUEST BY", value=user.mention, inline=False)
+    e = discord.Embed(color=0x57F287, timestamp=datetime.now(timezone.utc))
+    # Autor con icono de punto verde al lado del título
+    e.set_author(name="FMD BYPASS • Success", icon_url=URL_GREEN_DOT)
+    # Miniatura con el emoji que enviaste
+    e.set_thumbnail(url=URL_THUMBNAIL)
+    # Resultado (acortado a 900 caracteres para que quepa)
+    e.add_field(name="🔑 Result:", value=f"```txt\n{result[:900]}\n```", inline=False)
+    # Tiempo de respuesta
+    e.add_field(name="⏰ Time:", value=f"`{elapsed:.2f}s`", inline=False)
+    # Banner principal
     e.set_image(url=URL_MAIN_GIF)
     e.set_footer(text=_footer())
     return e
 
 def embed_fail(error: str, elapsed: float, user: discord.User) -> discord.Embed:
-    e = discord.Embed(color=C_ERROR, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BYPASS • Failed", icon_url=URL_NO)
-    e.set_thumbnail(url=URL_NO)
-    e.add_field(name="⚠️ ERROR:", value=f"```\n{error or '?'}\n```", inline=False)
-    e.add_field(name="⏰ TIME:", value=f"`{elapsed:.2f}s`", inline=False)
-    e.add_field(name="👤 REQUEST BY", value=user.mention, inline=False)
+    e = discord.Embed(color=0xED4245, timestamp=datetime.now(timezone.utc))
+    e.set_author(name="FMD BYPASS • Failed", icon_url=URL_GREEN_DOT)
+    e.set_thumbnail(url=URL_THUMBNAIL)
+    e.add_field(name="⚠️ Error:", value=f"```\n{error or '?'}\n```", inline=False)
+    e.add_field(name="⏰ Time:", value=f"`{elapsed:.2f}s`", inline=False)
     e.set_image(url=URL_MAIN_GIF)
     e.set_footer(text=_footer())
     return e
@@ -225,24 +221,24 @@ class FmdBypassView(View):
     def __init__(self, result: str, elapsed: float):
         super().__init__(timeout=None)
         self._result = result
+        # Botón de Invite (Link)
+        self.add_item(Button(label="Invite", emoji="🤖", url=BOT_INVITE_URL, style=discord.ButtonStyle.link, row=0))
 
-        self.add_item(Button(label="JOIN", emoji="💬", url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link, row=0))
-        self.add_item(Button(label="INVITE", emoji="🤖", url=BOT_INVITE_URL, style=discord.ButtonStyle.link, row=0))
-
-    @discord.ui.button(label="COPY", emoji="📋", style=discord.ButtonStyle.secondary, row=0)
+    @discord.ui.button(label="📋  Copy", style=discord.ButtonStyle.primary, row=0)
     async def copy_btn(self, interaction: discord.Interaction, button: Button):
-        # Móvil copia "RSU", PC copia el código completo
+        # Al hacer clic, se abre un mensaje efímero con el código listo para copiar
         await interaction.response.send_message(
-            f"RSU\n```txt\n{self._result[:1000]}\n```",
+            f"📋 Click dentro del bloque de código abajo para copiar:\n```txt\n{self._result[:1000]}\n```",
             ephemeral=True
         )
 
-    @discord.ui.button(label="DELETE", emoji="🗑️", style=discord.ButtonStyle.danger, row=0)
-    async def delete_btn(self, interaction: discord.Interaction, button: Button):
-        try:
-            await interaction.message.delete()
-        except Exception:
-            await interaction.response.send_message("❌ No pude eliminar el mensaje.", ephemeral=True)
+# ── FUNCIÓN DE AUTO ELIMINACIÓN ─────────────────────────────────
+async def auto_delete_msg(message: discord.Message, delay: int = 120):
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass # Si ya fue eliminado o hay errores, ignorar
 
 # ── BOT CLIENT ──────────────────────────────────────────────────
 class FmdBot(discord.Client):
@@ -293,16 +289,18 @@ class FmdBot(discord.Client):
 
             try:
                 if result:
-                    await status_msg.edit(
+                    msg = await status_msg.edit(
                         content=message.author.mention,
                         embed=embed_success(result, elapsed, message.author),
                         view=FmdBypassView(result, elapsed)
                     )
                 else:
-                    await status_msg.edit(
+                    msg = await status_msg.edit(
                         content=message.author.mention,
                         embed=embed_fail(error, elapsed, message.author)
                     )
+                # Auto-eliminar el mensaje a los 120 segundos
+                asyncio.create_task(auto_delete_msg(msg, 120))
             except Exception:
                 pass
 
@@ -314,7 +312,7 @@ bot = FmdBot()
 @app_commands.describe(url="El enlace a bypassear")
 async def cmd_bypass(interaction: discord.Interaction, url: str):
     if not _is_valid_url(url):
-        e = discord.Embed(description="⚠️ URL inválida. Asegúrate de incluir `http://` o `https://`.", color=C_WARN)
+        e = discord.Embed(description="⚠️ URL inválida. Asegúrate de incluir `http://` o `https://`.", color=0xFFA500)
         e.set_footer(text=_footer())
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -326,14 +324,16 @@ async def cmd_bypass(interaction: discord.Interaction, url: str):
 
     try:
         if result:
-            await interaction.edit_original_response(
+            msg = await interaction.edit_original_response(
                 embed=embed_success(result, elapsed, interaction.user),
                 view=FmdBypassView(result, elapsed)
             )
         else:
-            await interaction.edit_original_response(
+            msg = await interaction.edit_original_response(
                 embed=embed_fail(error, elapsed, interaction.user)
             )
+        # Auto-eliminar el mensaje a los 120 segundos
+        asyncio.create_task(auto_delete_msg(msg, 120))
     except Exception as e:
         logger.error(f"Error al editar respuesta: {e}")
 
@@ -347,7 +347,7 @@ async def cmd_setautobypass(interaction: discord.Interaction):
         e = discord.Embed(
             title="🔴 Auto-Bypass DESACTIVADO",
             description=f"{interaction.channel.mention} ya no hará bypass automático.",
-            color=C_ERROR
+            color=0xED4245
         )
     else:
         autobypass_channels.add(cid)
@@ -355,9 +355,9 @@ async def cmd_setautobypass(interaction: discord.Interaction):
         e = discord.Embed(
             title="🟢 Auto-Bypass ACTIVADO",
             description=f"Cada enlace en {interaction.channel.mention} será bypasseado automáticamente.",
-            color=C_RED
+            color=0x57F287
         )
-    e.set_author(name=BOT_NAME, icon_url=URL_CROWN)
+    e.set_author(name=BOT_NAME, icon_url=URL_GREEN_DOT)
     e.set_footer(text=_footer(f"Canales activos: {len(autobypass_channels)}"))
     await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -369,8 +369,8 @@ async def _ab_error(interaction: discord.Interaction, error: app_commands.AppCom
 @bot.tree.command(name="ping", description="🏓 Ver la latencia del bot")
 async def cmd_ping(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
-    e = discord.Embed(color=C_RED, timestamp=datetime.now(timezone.utc))
-    e.set_author(name=f"{BOT_NAME} — Ping", icon_url=URL_CROWN)
+    e = discord.Embed(color=0x57F287, timestamp=datetime.now(timezone.utc))
+    e.set_author(name=f"{BOT_NAME} — Ping", icon_url=URL_GREEN_DOT)
     e.add_field(name="📡 Latencia", value=f"`{ms}ms`", inline=True)
     e.add_field(name="⏰ Uptime", value=f"`{_uptime()}`", inline=True)
     e.add_field(name="🏰 Servidores", value=f"`{len(bot.guilds)}`", inline=True)
