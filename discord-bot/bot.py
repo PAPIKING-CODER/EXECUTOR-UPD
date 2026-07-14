@@ -50,19 +50,17 @@ BOT_CREDIT = "BY KING"
 # Cambialo con la variable de entorno BOT_TRIGGER si quieres otra palabra.
 BOT_TRIGGER = os.environ.get("BOT_TRIGGER", "fmd")
 
-BYPASS_API_URL = "http://fi8.bot-hosting.net:21163/freeapibypass?url="
-SUPPORTED_ENDPOINT = "http://fi8.bot-hosting.net:21163/supported"
+BYPASS_API_URL = "https://king-api-25n8.onrender.com/api/bypass?url="
+SUPPORTED_ENDPOINT = "https://king-api-25n8.onrender.com/api/supported"
 BYPASS_TIMEOUT = 30
 BYPASS_RETRIES = 3
 BYPASS_DELAY   = 3
 
-# ── RATE LIMIT GLOBAL para Banana API ──────────────────────────────
-# Máximo 4 peticiones cada 10s EN TODO EL BOT (no por usuario). Si se excede,
-# Banana API banea la IP/key de forma PERMANENTE, así que esto se aplica en
-# el único punto donde de verdad se llama a la API — cada intento (incluidos
-# los reintentos) pasa por aquí antes de disparar la petición HTTP. Es
+# ── RATE LIMIT GLOBAL para KING API ────────────────────────────────
+# Máximo 10 peticiones cada 10s EN TODO EL BOT (no por usuario).
+# KING API es nuestro propio servidor — límite más holgado que la API anterior.
 # thread-safe porque _bypass_sync corre en threads del executor.
-BANANA_RATE_MAX = 4
+BANANA_RATE_MAX = 10
 BANANA_RATE_WINDOW = 10.0
 _rl_lock = threading.Lock()
 _rl_times = deque()
@@ -285,7 +283,7 @@ def _bypass_sync(url: str):
     last_err = "Error desconocido"
     for attempt in range(1, BYPASS_RETRIES + 1):
         try:
-            _rate_limit_wait()  # nunca más de 4 peticiones cada 10s a Banana API
+            _rate_limit_wait()  # nunca más de 10 peticiones cada 10s a KING API
             resp = _http.get(BYPASS_API_URL + quote(url, safe=""), timeout=BYPASS_TIMEOUT)
             if resp.status_code != 200:
                 last_err = f"HTTP {resp.status_code}"
