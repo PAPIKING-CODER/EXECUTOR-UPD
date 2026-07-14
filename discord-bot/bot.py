@@ -1,4 +1,4 @@
-# FMD BOT — Bypass + Fun Commands
+# FMD BOT — Bypass + Fun Commands (versión mejorada)
 import sys, types
 
 try:
@@ -215,28 +215,22 @@ def _t(guild_id: int, key: str, **kwargs) -> str:
     except Exception:
         return text
 
-# ── BYPASS ENGINE ────────────────────────────────────────────────
-_KEYS = ("content","result","loadstring","bypassed","bypassed_link",
-         "bypassed_url","final_url","destination","url","link","key","output")
+# ── BYPASS ENGINE (MEJORADO) ────────────────────────────────────
 _http = requests.Session()
 _http.headers.update({"User-Agent": "FMDBot/1.0"})
 
-def _extract(data):
+def _extract_url(data):
+    """Busca recursivamente cualquier cadena que parezca una URL en el objeto JSON."""
     if isinstance(data, dict):
-        for k in _KEYS:
-            v = data.get(k)
-            if isinstance(v, str) and v.strip().startswith(("http://", "https://")):
-                return v.strip()
         for v in data.values():
             if isinstance(v, str) and v.strip().startswith(("http://", "https://")):
                 return v.strip()
-        for v in data.values():
             if isinstance(v, (dict, list)):
-                r = _extract(v)
+                r = _extract_url(v)
                 if r: return r
     elif isinstance(data, list):
         for item in data:
-            r = _extract(item)
+            r = _extract_url(item)
             if r: return r
     return None
 
@@ -245,7 +239,7 @@ def _bypass_sync(url: str):
     for attempt in range(1, BYPASS_RETRIES + 1):
         try:
             resp = _http.get(BYPASS_API_URL + quote(url, safe=""), timeout=BYPASS_TIMEOUT)
-            # Intentar parsear JSON siempre (incluso si no es 200)
+            # Intentar parsear JSON siempre
             data = None
             try:
                 data = resp.json()
@@ -264,47 +258,53 @@ def _bypass_sync(url: str):
                     continue
                 return None, last_err
 
+            # Si la respuesta es un texto plano que es URL
             if data is None:
                 txt = resp.text.strip()
-                if txt.startswith("http"):
+                if txt.startswith(("http://", "https://")):
                     return txt, None
-                last_err = "Respuesta inválida"
+                last_err = "Respuesta inválida (no JSON ni URL)"
                 if attempt < BYPASS_RETRIES:
                     time.sleep(BYPASS_DELAY)
                     continue
                 return None, last_err
 
-            api_err = False
+            # Buscar indicadores de error en el JSON
+            is_error = False
             if isinstance(data, dict):
+                if data.get("success") is False or data.get("error") is True:
+                    is_error = True
                 status_val = str(data.get("status", "")).lower()
-                if data.get("success") is False or data.get("error") or status_val == "error":
-                    api_err = True
+                if status_val in ("error", "fail"):
+                    is_error = True
 
-            result = _extract(data)
-            if result and not api_err:
+            # Intentar extraer URL
+            result = _extract_url(data)
+            if result and not is_error:
                 return result, None
 
-            if api_err:
-                msg = (data.get("message") or data.get("error")) if isinstance(data, dict) else None
-                last_err = str(msg or "Sin resultado")
+            # Si no hay resultado pero success es True, buscar cualquier URL en todo el objeto
+            if isinstance(data, dict) and data.get("success") is True:
+                for v in data.values():
+                    if isinstance(v, str) and v.startswith(("http://", "https://")):
+                        return v, None
+
+            # Si hay error explícito
+            if is_error:
+                msg = data.get("message") or data.get("error") if isinstance(data, dict) else None
+                last_err = str(msg or "Error de la API")
                 if attempt < BYPASS_RETRIES:
                     time.sleep(BYPASS_DELAY)
                     continue
                 return None, last_err
 
-            if not result:
-                # Si success es True pero no hay resultado, buscar cualquier valor que sea URL
-                if isinstance(data, dict) and data.get("success") is True:
-                    for v in data.values():
-                        if isinstance(v, str) and v.startswith(("http://", "https://")):
-                            return v, None
-                last_err = "No se encontró una URL válida en la respuesta de la API"
-                if attempt < BYPASS_RETRIES:
-                    time.sleep(BYPASS_DELAY)
-                    continue
-                return None, last_err
+            # Si no hay URL y no es error
+            last_err = "No se encontró una URL en la respuesta"
+            if attempt < BYPASS_RETRIES:
+                time.sleep(BYPASS_DELAY)
+                continue
+            return None, last_err
 
-            return None, "Sin resultado"
         except requests.exceptions.Timeout:
             last_err = f"Timeout ({BYPASS_TIMEOUT}s)"
             if attempt < BYPASS_RETRIES:
@@ -2164,7 +2164,7 @@ async def _handle_member_join(member: discord.Member):
                     le = discord.Embed(
                         description=f"⚠️ AntiRaid marcó a {member.mention} como sospechoso (cuenta de {age_days} día(s))",
                         color=C_RED, timestamp=datetime.now(timezone.utc))
-                        le.set_footer(text=_footer(), icon_url=URL_REDPT)
+                    le.set_footer(text=_footer(), icon_url=URL_REDPT)
                     try: await log_ch.send(embed=le)
                     except Exception: pass
 
