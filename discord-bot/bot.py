@@ -178,6 +178,22 @@ def save_all():
     save_json("tickets.json", tickets_data)
     save_json(AUTOBYPASS_CHANNELS_FILE, list(autobypass_channels))
 
+# ── CLASE DEL BOT ──────────────────────────────────────────────
+class FmdBot(discord.Client):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.members = True
+        intents.message_content = True
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        await self.tree.sync()
+        logger.info("✅ Comandos globales sincronizados.")
+
+# ── CREAR INSTANCIA DEL BOT (IMPORTANTE: ANTES DE LOS DECORADORES) ──
+bot = FmdBot()
+
 # ── MOTOR DE BYPASS (INTACTO) ──────────────────────────────────
 _http_session = requests.Session()
 _http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
@@ -339,7 +355,11 @@ async def _start_countdown(message: discord.Message, base_embed: discord.Embed, 
     except Exception:
         pass
 
-# ── COMANDOS DE BYPASS ──────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════
+#  COMANDOS
+# ══════════════════════════════════════════════════════════════
+
+# ── BYPASS ──────────────────────────────────────────────────────
 @bot.tree.command(name="bypass", description="🔓 Bypass un enlace y obtén el destino real")
 @app_commands.describe(url="El enlace a bypassear")
 async def cmd_bypass(interaction: discord.Interaction, url: str):
@@ -397,9 +417,7 @@ async def _ab_error(interaction: discord.Interaction, error: app_commands.AppCom
     if isinstance(error, app_commands.MissingPermissions):
         await interaction.response.send_message("🚫 Necesitas permiso de Administrador!", ephemeral=True)
 
-# ══════════════════════════════════════════════════════════════
-# 🎁 GIVEAWAYS
-# ══════════════════════════════════════════════════════════════
+# ── GIVEAWAYS ──────────────────────────────────────────────────
 giveaway_group = app_commands.Group(name="giveaway", description="Sistema de sorteos")
 
 @giveaway_group.command(name="crear", description="🎁 Crear un nuevo giveaway")
@@ -540,9 +558,7 @@ async def gv_lista(interaction: discord.Interaction):
 
 bot.tree.add_command(giveaway_group)
 
-# ══════════════════════════════════════════════════════════════
-# 📌 INFORMACIÓN
-# ══════════════════════════════════════════════════════════════
+# ── INFORMACIÓN ──────────────────────────────────────────────
 @bot.tree.command(name="help", description="📖 Panel de ayuda del bot")
 async def cmd_help(interaction: discord.Interaction):
     e = discord.Embed(
@@ -618,9 +634,7 @@ async def cmd_bot(interaction: discord.Interaction):
 async def cmd_ping(interaction: discord.Interaction):
     await interaction.response.send_message(f"🏓 Pong! `{round(bot.latency * 1000)}ms`")
 
-# ══════════════════════════════════════════════════════════════
-# 🛡️ MODERACIÓN
-# ══════════════════════════════════════════════════════════════
+# ── MODERACIÓN ──────────────────────────────────────────────
 @bot.tree.command(name="ban", description="🔨 Banear un usuario")
 @app_commands.checks.has_permissions(ban_members=True)
 @app_commands.describe(usuario="Usuario a banear", razon="Razón del ban")
@@ -684,9 +698,7 @@ async def cmd_unlock(interaction: discord.Interaction):
     await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=None)
     await interaction.response.send_message(f"{EMOJI_GREEN_SIREN} {interaction.channel.mention} desbloqueado.")
 
-# ══════════════════════════════════════════════════════════════
-# 😂 DIVERSIÓN
-# ══════════════════════════════════════════════════════════════
+# ── DIVERSIÓN ──────────────────────────────────────────────────
 @bot.tree.command(name="meme", description="😂 Meme aleatorio de Reddit")
 async def cmd_meme(interaction: discord.Interaction):
     await interaction.response.defer()
@@ -742,9 +754,7 @@ async def cmd_gif(interaction: discord.Interaction, busqueda: str):
 async def cmd_random(interaction: discord.Interaction, min: int = 1, max: int = 100):
     await interaction.response.send_message(f"🎲 Número: **{random.randint(min, max)}**")
 
-# ══════════════════════════════════════════════════════════════
-# 🎫 SOPORTE (TICKETS)
-# ══════════════════════════════════════════════════════════════
+# ── TICKETS ────────────────────────────────────────────────────
 ticket_group = app_commands.Group(name="ticket", description="Sistema de tickets")
 
 @ticket_group.command(name="crear", description="🎫 Crear un nuevo ticket")
@@ -796,9 +806,7 @@ async def tk_panel(interaction: discord.Interaction):
 
 bot.tree.add_command(ticket_group)
 
-# ══════════════════════════════════════════════════════════════
-# 💰 ECONOMÍA
-# ══════════════════════════════════════════════════════════════
+# ── ECONOMÍA ──────────────────────────────────────────────────
 def _eco_get(uid):
     uid = str(uid)
     if uid not in economy_data:
@@ -864,9 +872,7 @@ async def cmd_inventory(interaction: discord.Interaction):
         return await interaction.response.send_message("🎒 Tu inventario está vacío.", ephemeral=True)
     await interaction.response.send_message(f"🎒 **Inventario:**\n" + "\n".join([f"- {i}" for i in items]))
 
-# ══════════════════════════════════════════════════════════════
-# 📈 NIVELES
-# ══════════════════════════════════════════════════════════════
+# ── NIVELES ────────────────────────────────────────────────────
 def _lvl_get(uid):
     uid = str(uid)
     if uid not in levels_data:
@@ -916,13 +922,7 @@ async def cmd_setlevel(interaction: discord.Interaction, usuario: discord.Member
     save_json("levels.json", levels_data)
     await interaction.response.send_message(f"✅ Nivel de {usuario.display_name} cambiado a `{nivel}`.")
 
-# ══════════════════════════════════════════════════════════════
-# 🤖 BOT
-# ══════════════════════════════════════════════════════════════
-@bot.tree.command(name="bot", description="🤖 Información del bot")
-async def cmd_bot(interaction: discord.Interaction):
-    await cmd_bot(interaction)  # already defined above, but we can keep
-
+# ── BOT ────────────────────────────────────────────────────────
 @bot.tree.command(name="invite", description="📩 Invitar al bot")
 async def cmd_invite(interaction: discord.Interaction):
     await interaction.response.send_message(f"🤖 **Invíta al bot:**\nhttps://discord.com/oauth2/authorize?client_id={bot.user.id}&permissions=8&scope=bot+applications.commands")
@@ -944,12 +944,9 @@ async def cmd_stats(interaction: discord.Interaction):
 @bot.tree.command(name="feedback", description="📝 Enviar feedback al creador")
 @app_commands.describe(mensaje="Tu mensaje")
 async def cmd_feedback(interaction: discord.Interaction, mensaje: str):
-    # Not implemented fully, just a placeholder
     await interaction.response.send_message("✅ Feedback enviado. ¡Gracias!", ephemeral=True)
 
-# ══════════════════════════════════════════════════════════════
-# ⚙️ CONFIGURACIÓN
-# ══════════════════════════════════════════════════════════════
+# ── CONFIGURACIÓN ──────────────────────────────────────────────
 @bot.tree.command(name="setup", description="⚙️ [Admin] Panel de configuración rápida")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_setup(interaction: discord.Interaction):
@@ -978,9 +975,7 @@ async def cmd_config(interaction: discord.Interaction, tipo: str, canal: discord
         return
     save_json("configs.json", config_data)
 
-# ══════════════════════════════════════════════════════════════
-# 🧩 ROLES
-# ══════════════════════════════════════════════════════════════
+# ── ROLES ───────────────────────────────────────────────────────
 @bot.tree.command(name="autorole", description="🎭 [Admin] Configurar rol automático al unirse")
 @app_commands.checks.has_permissions(administrator=True)
 @app_commands.describe(rol="Rol a asignar")
@@ -1042,9 +1037,7 @@ async def cmd_temp_role(interaction: discord.Interaction, usuario: discord.Membe
         await usuario.remove_roles(rol)
         await interaction.followup.send(f"⏰ Rol {rol.mention} removido de {usuario.mention}.", ephemeral=True)
 
-# ══════════════════════════════════════════════════════════════
-# 🏠 SERVIDOR
-# ══════════════════════════════════════════════════════════════
+# ── SERVIDOR ────────────────────────────────────────────────────
 @bot.tree.command(name="server", description="🏠 Información del servidor")
 async def cmd_server(interaction: discord.Interaction):
     await cmd_serverinfo(interaction)
@@ -1085,9 +1078,7 @@ async def cmd_serverstats(interaction: discord.Interaction):
     e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e)
 
-# ══════════════════════════════════════════════════════════════
-# 🔍 BÚSQUEDA
-# ══════════════════════════════════════════════════════════════
+# ── BÚSQUEDA ────────────────────────────────────────────────────
 @bot.tree.command(name="google", description="🔍 Buscar en Google (simulado)")
 @app_commands.describe(query="Término de búsqueda")
 async def cmd_google(interaction: discord.Interaction, query: str):
@@ -1141,9 +1132,7 @@ async def cmd_weather(interaction: discord.Interaction, ciudad: str):
     except:
         await interaction.followup.send("❌ Error al consultar el clima.")
 
-# ══════════════════════════════════════════════════════════════
-# 🗓️ ORGANIZACIÓN
-# ══════════════════════════════════════════════════════════════
+# ── ORGANIZACIÓN ───────────────────────────────────────────────
 @bot.tree.command(name="reminder", description="⏰ Crear un recordatorio")
 @app_commands.describe(minutos="Minutos", mensaje="Mensaje del recordatorio")
 async def cmd_reminder(interaction: discord.Interaction, minutos: int, mensaje: str):
@@ -1151,9 +1140,7 @@ async def cmd_reminder(interaction: discord.Interaction, minutos: int, mensaje: 
     await asyncio.sleep(minutos * 60)
     await interaction.followup.send(f"{EMOJI_ALARM} **Recordatorio para {interaction.user.mention}:** {mensaje}")
 
-# ══════════════════════════════════════════════════════════════
-# EVENTOS DEL BOT
-# ══════════════════════════════════════════════════════════════
+# ── EVENTOS DEL BOT ────────────────────────────────────────────
 @bot.event
 async def on_ready():
     logger.info(f"✅ {bot.user.name} Online! en {len(bot.guilds)} servidores.")
