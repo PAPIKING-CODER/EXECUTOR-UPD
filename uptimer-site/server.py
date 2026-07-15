@@ -1,15 +1,14 @@
 import os
-import http.server
-import socketserver
+from http.server import HTTPServer, SimpleHTTPRequestHandler
 
-PORT = int(os.environ.get("PORT", "8080"))
+class Handler(SimpleHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == '/':
+            self.path = '/index.html'
+        return SimpleHTTPRequestHandler.do_GET(self)
 
-class Handler(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, fmt, *args):
-        pass  # silence request logs
-
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-
-print(f"[FMD BOT] Status page en puerto {PORT}")
-with socketserver.TCPServer(("0.0.0.0", PORT), Handler) as httpd:
-    httpd.serve_forever()
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 8080))
+    server = HTTPServer(('', port), Handler)
+    print(f"🔥 Servidor web corriendo en puerto {port}")
+    server.serve_forever()
