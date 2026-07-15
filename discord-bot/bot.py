@@ -98,7 +98,7 @@ def _uptime() -> str:
 def _footer() -> str:
     return "Made by KING\nFMD BOT • BYPASS"
 
-# ── MOTOR DE BYPASS ──────────────────────────────────────────────
+# ── MOTOR DE BYPASS (Robusto) ──────────────────────────────────
 _http_session = requests.Session()
 _http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
 
@@ -282,12 +282,14 @@ class FmdBot(discord.Client):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
         
-        # Lógica de IA automática (DeepSeek)
+        # Lógica de IA automática (DeepSeek) - con protección contra congelamiento
         if message.channel.id in self.ai_channels and self.ai_client:
             if not message.content.startswith('/'):
                 try:
                     async with message.channel.typing():
-                        completion = await self.ai_client.chat.completions.create(
+                        # Usamos asyncio.to_thread para evitar bloquear el loop principal
+                        completion = await asyncio.to_thread(
+                            self.ai_client.chat.completions.create,
                             messages=[
                                 {"role": "system", "content": "Eres un asistente útil y amigable en Discord. Responde de forma concisa y divertida."},
                                 {"role": "user", "content": message.content}
@@ -300,7 +302,7 @@ class FmdBot(discord.Client):
                 except Exception as e:
                     logger.error(f"Error en IA: {e}")
 
-        # Auto bypass
+        # Auto bypass - detecta enlaces en el mensaje
         if message.channel.id in autobypass_channels:
             urls = _URL_RE.findall(message.content)
             if urls:
@@ -1048,11 +1050,10 @@ async def chat(interaction: discord.Interaction, mensaje: str):
         return await interaction.response.send_message(f"{EMOJIS['error']} La API de DeepSeek no está configurada.", ephemeral=True)
     await interaction.response.defer()
     try:
-        completion = await bot.ai_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": "Eres un asistente útil en Discord."},
-                {"role": "user", "content": mensaje}
-            ],
+        # Usamos asyncio.to_thread para evitar congelar el bot
+        completion = await asyncio.to_thread(
+            bot.ai_client.chat.completions.create,
+            messages=[{"role": "system", "content": "Eres un asistente útil en Discord."}, {"role": "user", "content": mensaje}],
             model="deepseek-chat",
             temperature=0.7,
             max_tokens=200
