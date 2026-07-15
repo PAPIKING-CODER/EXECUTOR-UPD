@@ -20,7 +20,15 @@ from discord.ui import Button, View
 import requests
 import aiohttp
 from dotenv import load_dotenv
-from groq import AsyncGroq
+
+# ── IMPORTAÇÃO SEGURA DE GROQ ────────────────────────────────
+try:
+    from groq import AsyncGroq
+    GROQ_AVAILABLE = True
+except ImportError:
+    AsyncGroq = None
+    GROQ_AVAILABLE = False
+    print("⚠️ AVISO: Librería 'groq' no instalada. La IA no funcionará.")
 
 load_dotenv()
 
@@ -51,7 +59,7 @@ VPS_BYPASS_RETRY_DELAY = 3
 
 AUTOBYPASS_CHANNELS_FILE = "autobypass_channels.json"
 
-# ── TUS NUEVOS EMOJIS (Del bloque que pasaste) ────────────────
+# ── TUS NUEVOS EMOJIS ──────────────────────────────────────────
 EMOJIS = {
     "giveaway": "<:giveaway:1526817132501798983>",
     "gift": "<:gift:1526817190660280360>",
@@ -90,7 +98,7 @@ def _uptime() -> str:
 def _footer() -> str:
     return "Made by KING\nFMD BOT • BYPASS"
 
-# ── MOTOR DE BYPASS (Robusto) ──────────────────────────────────
+# ── MOTOR DE BYPASS ──────────────────────────────────────────────
 _http_session = requests.Session()
 _http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
 
@@ -234,13 +242,13 @@ class FmdBot(discord.Client):
         # Datos para Economía y Moderación
         self.economy_data = self.load_json('data/economy.json')
         self.warnings_data = self.load_json('data/warnings.json')
-        self.ai_channels = set()  # Canales con IA automática
+        self.ai_channels = set()
         
         # Cliente Groq
-        self.groq_client = AsyncGroq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+        self.groq_client = AsyncGroq(api_key=GROQ_API_KEY) if (GROQ_AVAILABLE and GROQ_API_KEY) else None
         
-        # Sesión HTTP para APIs
-        self.session = aiohttp.ClientSession()
+        # Sesión HTTP (Inicializada en setup_hook para evitar errores de loop)
+        self.session = None
 
     def load_json(self, path):
         try:
@@ -255,8 +263,16 @@ class FmdBot(discord.Client):
             json.dump(data, f, indent=4)
 
     async def setup_hook(self):
+        # Iniciar sesión de aiohttp correctamente dentro de un contexto async
+        self.session = aiohttp.ClientSession()
         await self.tree.sync()
         logger.info(f"{EMOJIS['success']} Comandos globales sincronizados.")
+
+    async def close(self):
+        # Cerrar la sesión limpia al apagar el bot
+        if self.session:
+            await self.session.close()
+        await super().close()
 
     async def on_ready(self):
         logger.info("=========================================")
@@ -268,7 +284,7 @@ class FmdBot(discord.Client):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
         
-        # Lógica de IA automática (solo si el canal está configurado)
+        # Lógica de IA automática
         if message.channel.id in self.ai_channels and self.groq_client:
             if not message.content.startswith('/'):
                 try:
@@ -286,7 +302,7 @@ class FmdBot(discord.Client):
                 except Exception as e:
                     logger.error(f"Error en IA: {e}")
 
-        # Auto bypass (tu sistema intacto)
+        # Auto bypass
         if message.channel.id in autobypass_channels:
             urls = _URL_RE.findall(message.content)
             if urls:
@@ -333,7 +349,7 @@ async def cmd_bypass(interaction: discord.Interaction, url: str):
     elapsed = time.time() - t0
     try:
         if result:
-            platform = "PC" # No detectamos plataforma en esta versión simplificada, usamos PC
+            platform = "PC"
             embed = embed_success(result, elapsed, platform)
             view = FmdBypassView(result)
             msg = await interaction.edit_original_response(embed=embed, view=view)
@@ -368,9 +384,8 @@ async def _ab_error(interaction: discord.Interaction, error: app_commands.AppCom
         await interaction.response.send_message("🚫 Necesitas permiso de Administrador!", ephemeral=True)
 
 # ══════════════════════════════════════════════════════════════════
-#  COMANDOS DE UTILIDAD / BÁSICOS (Del bloque nuevo)
+#  COMANDOS DE UTILIDAD / BÁSICOS
 # ══════════════════════════════════════════════════════════════════
-
 @bot.tree.command(name="help", description="Muestra el menú de ayuda completo")
 async def help_cmd(interaction: discord.Interaction):
     embed = discord.Embed(title=f"{EMOJIS['green_crown']} Menú de Ayuda", color=0x5865F2)
@@ -932,7 +947,6 @@ async def weather(interaction: discord.Interaction, ciudad: str):
 
 @bot.tree.command(name="translate", description="Traduce texto (Español <-> Inglés)")
 async def translate(interaction: discord.Interaction, texto: str, idioma: str = 'en'):
-    # Ejemplo conceptual. Se puede usar API de MyMemory si se desea.
     await interaction.response.send_message(f"{EMOJIS['warning']} La traducción requiere configuración avanzada. Texto recibido: {texto}", ephemeral=True)
 
 @bot.tree.command(name="define", description="Define una palabra en inglés")
