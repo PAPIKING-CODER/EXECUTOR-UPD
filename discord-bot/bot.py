@@ -187,6 +187,68 @@ def save_all():
     save_json("reminders.json", reminders_data)
     save_json(AUTOBYPASS_CHANNELS_FILE, list(autobypass_channels))
 
+# ── CLASE DEL BOT ──────────────────────────────────────────────
+class FmdBot(discord.Client):
+    def __init__(self):
+        intents = discord.Intents.default()
+        intents.members = True
+        intents.message_content = True
+        super().__init__(intents=intents)
+        self.tree = app_commands.CommandTree(self)
+
+    async def setup_hook(self):
+        await self.tree.sync()
+        logger.info("✅ Comandos globales sincronizados.")
+
+    async def on_ready(self):
+        logger.info(f"✅ {self.user.name} Online! en {len(self.guilds)} servidores.")
+        await self.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/bypass"))
+
+    async def on_message(self, message: discord.Message):
+        if message.author.bot:
+            return
+        # AUTO-BYPASS
+        if message.channel.id in autobypass_channels:
+            urls = _URL_RE.findall(message.content)
+            if urls:
+                try:
+                    await message.delete()
+                except Exception:
+                    pass
+                for url in urls[:3]:
+                    if _is_valid_url(url):
+                        loop = asyncio.get_running_loop()
+                        status_msg = await message.channel.send(embed=embed_loading())
+                        t0 = time.time()
+                        result, error = await loop.run_in_executor(None, _bypass_sync, url)
+                        elapsed = time.time() - t0
+                        try:
+                            if result:
+                                embed = embed_success(result, elapsed, EMOJI_EMOJIGG_PC)
+                                view = FmdBypassView(result)
+                                msg = await status_msg.edit(embed=embed, view=view)
+                                asyncio.create_task(_start_countdown(msg, embed, view))
+                            else:
+                                embed = embed_fail(error, elapsed, EMOJI_EMOJIGG_PC)
+                                msg = await status_msg.edit(embed=embed)
+                                asyncio.create_task(_start_countdown(msg, embed, View()))
+                        except Exception:
+                            pass
+        # XP system
+        uid = str(message.author.id)
+        if uid not in levels_data:
+            levels_data[uid] = {"xp": 0, "level": 1}
+        levels_data[uid]["xp"] += random.randint(1, 3)
+        if levels_data[uid]["xp"] >= levels_data[uid]["level"] * 50:
+            levels_data[uid]["level"] += 1
+            levels_data[uid]["xp"] = 0
+            if levels_data[uid]["level"] % 5 == 0:
+                await message.channel.send(f"{EMOJI_EMOJIGG_XP} {message.author.mention} ha subido al nivel **{levels_data[uid]['level']}**!")
+            save_json("levels.json", levels_data)
+
+# ── CREAR INSTANCIA DEL BOT (AHORA SÍ, ANTES DE CUALQUIER DECORADOR) ──
+bot = FmdBot()
+
 # ── MOTOR DE BYPASS (INTACTO) ──────────────────────────────────
 _http_session = requests.Session()
 _http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
@@ -349,53 +411,6 @@ async def _start_countdown(message: discord.Message, base_embed: discord.Embed, 
         await message.delete()
     except Exception:
         pass
-
-# ── COMANDOS DE BYPASS (INTACTOS) ──────────────────────────────
-@bot.tree.command(name="bypass", description="🔓 Bypass un enlace y obtén el destino real")
-@app_commands.describe(url="El enlace a bypassear")
-async def cmd_bypass(interaction: discord.Interaction, url: str):
-    if not _is_valid_url(url):
-        e = discord.Embed(description="⚠️ URL inválida. Asegúrate de incluir `http://` o `https://`.", color=C_WARN)
-        e.set_footer(text=_footer())
-        return await interaction.response.send_message(embed=e, ephemeral=True)
-    await interaction.response.send_message(embed=embed_loading())
-    t0 = time.time()
-    result, error = await asyncio.get_running_loop().run_in_executor(None, _bypass_sync, url)
-    elapsed = time.time() - t0
-    platform_emoji = _get_platform(interaction)
-    try:
-        if result:
-            embed = embed_success(result, elapsed, platform_emoji)
-            view = FmdBypassView(result)
-            msg = await interaction.edit_original_response(embed=embed, view=view)
-            asyncio.create_task(_start_countdown(msg, embed, view))
-        else:
-            embed = embed_fail(error, elapsed, platform_emoji)
-            msg = await interaction.edit_original_response(embed=embed)
-            asyncio.create_task(_start_countdown(msg, embed, View()))
-    except Exception as e:
-        logger.error(f"Error al editar respuesta: {e}")
-
-@bot.tree.command(name="setautobypass", description="⚙️ [Admin] Activar/desactivar auto-bypass en este canal")
-@app_commands.checks.has_permissions(administrator=True)
-async def cmd_setautobypass(interaction: discord.Interaction):
-    cid = interaction.channel_id
-    if cid in autobypass_channels:
-        autobypass_channels.discard(cid)
-        save_json(AUTOBYPASS_CHANNELS_FILE, list(autobypass_channels))
-        e = discord.Embed(title="Auto-Bypass DESACTIVADO", description=f"{interaction.channel.mention} ya no hará bypass automático.", color=C_ERROR)
-    else:
-        autobypass_channels.add(cid)
-        save_json(AUTOBYPASS_CHANNELS_FILE, list(autobypass_channels))
-        e = discord.Embed(title="Auto-Bypass ACTIVADO", description=f"Cada enlace en {interaction.channel.mention} será bypasseado automáticamente.", color=C_GREEN)
-    e.set_author(name=f"{EMOJI_GREEN_DOT} FMD BOT • BYPASS")
-    e.set_footer(text=_footer())
-    await interaction.response.send_message(embed=e, ephemeral=True)
-
-@cmd_setautobypass.error
-async def _ab_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message("🚫 Necesitas permiso de Administrador!", ephemeral=True)
 
 # ==============================================================
 #  🎁 GIVEAWAY
@@ -1121,65 +1136,6 @@ async def cmd_reminder(interaction: discord.Interaction, minutos: int, mensaje: 
     await interaction.response.send_message(f"{EMOJI_ALARM} Recordatorio en {minutos} min: `{mensaje}`", ephemeral=True)
     await asyncio.sleep(minutos * 60)
     await interaction.followup.send(f"{EMOJI_ALARM} **Recordatorio para {interaction.user.mention}:** {mensaje}")
-
-# ==============================================================
-#  EVENTOS DEL BOT
-# ==============================================================
-@bot.event
-async def on_ready():
-    logger.info(f"✅ {bot.user.name} Online! en {len(bot.guilds)} servidores.")
-    await bot.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/bypass"))
-
-@bot.event
-async def on_message(message: discord.Message):
-    if message.author.bot:
-        return
-    # Auto-bypass (ya está implementado en la clase del bot, pero también lo ponemos aquí)
-    if message.channel.id in autobypass_channels:
-        urls = _URL_RE.findall(message.content)
-        if urls:
-            try:
-                await message.delete()
-            except Exception:
-                pass
-            for url in urls[:3]:
-                if _is_valid_url(url):
-                    loop = asyncio.get_running_loop()
-                    status_msg = await message.channel.send(embed=embed_loading())
-                    t0 = time.time()
-                    result, error = await loop.run_in_executor(None, _bypass_sync, url)
-                    elapsed = time.time() - t0
-                    try:
-                        if result:
-                            embed = embed_success(result, elapsed, EMOJI_EMOJIGG_PC)
-                            view = FmdBypassView(result)
-                            msg = await status_msg.edit(embed=embed, view=view)
-                            asyncio.create_task(_start_countdown(msg, embed, view))
-                        else:
-                            embed = embed_fail(error, elapsed, EMOJI_EMOJIGG_PC)
-                            msg = await status_msg.edit(embed=embed)
-                            asyncio.create_task(_start_countdown(msg, embed, View()))
-                    except Exception:
-                        pass
-    # XP system
-    uid = str(message.author.id)
-    if uid not in levels_data:
-        levels_data[uid] = {"xp": 0, "level": 1}
-    levels_data[uid]["xp"] += random.randint(1, 3)
-    if levels_data[uid]["xp"] >= levels_data[uid]["level"] * 50:
-        levels_data[uid]["level"] += 1
-        levels_data[uid]["xp"] = 0
-        if levels_data[uid]["level"] % 5 == 0:
-            await message.channel.send(f"{EMOJI_EMOJIGG_XP} {message.author.mention} ha subido al nivel **{levels_data[uid]['level']}**!")
-        save_json("levels.json", levels_data)
-
-@bot.event
-async def on_member_join(member: discord.Member):
-    gid = str(member.guild.id)
-    if gid in config_data and "autorol" in config_data[gid]:
-        role = member.guild.get_role(config_data[gid]["autorol"])
-        if role:
-            await member.add_roles(role)
 
 # ── HEALTH SERVER ──────────────────────────────────────────────
 class _HealthHandler(BaseHTTPRequestHandler):
