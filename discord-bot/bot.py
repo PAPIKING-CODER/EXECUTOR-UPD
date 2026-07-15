@@ -21,14 +21,14 @@ import requests
 import aiohttp
 from dotenv import load_dotenv
 
-# ── IMPORTAÇÃO SEGURA DE GROQ ────────────────────────────────
+# ── Importación segura de OpenAI (para DeepSeek) ──────────────
 try:
-    from groq import AsyncGroq
-    GROQ_AVAILABLE = True
+    from openai import AsyncOpenAI
+    OPENAI_AVAILABLE = True
 except ImportError:
-    AsyncGroq = None
-    GROQ_AVAILABLE = False
-    print("⚠️ AVISO: Librería 'groq' no instalada. La IA no funcionará.")
+    AsyncOpenAI = None
+    OPENAI_AVAILABLE = False
+    print("⚠️ AVISO: Librería 'openai' no instalada. La IA no funcionará.")
 
 load_dotenv()
 
@@ -49,7 +49,7 @@ DISCORD_TOKEN      = os.environ.get("DISCORD_TOKEN", "")
 PORT               = int(os.environ.get("PORT", "8080"))
 SUPPORT_SERVER_URL = os.environ.get("SUPPORT_SERVER_URL", "https://discord.gg/nU9MNnByHH")
 BOT_INVITE_URL     = os.environ.get("BOT_INVITE_URL", "https://discord.com/oauth2/authorize?client_id=1525629900038475969")
-GROQ_API_KEY       = os.environ.get("GROQ_API_KEY", "")
+DEEPSEEK_API_KEY   = os.environ.get("DEEPSEEK_API_KEY", "")
 WEATHER_API_KEY    = os.environ.get("WEATHER_API_KEY", "")
 
 VPS_BYPASS_ENDPOINT    = "https://4pi-bypass.vercel.app/api/bypass?url="
@@ -244,10 +244,10 @@ class FmdBot(discord.Client):
         self.warnings_data = self.load_json('data/warnings.json')
         self.ai_channels = set()
         
-        # Cliente Groq
-        self.groq_client = AsyncGroq(api_key=GROQ_API_KEY) if (GROQ_AVAILABLE and GROQ_API_KEY) else None
+        # Cliente DeepSeek (OpenAI base)
+        self.ai_client = AsyncOpenAI(api_key=DEEPSEEK_API_KEY, base_url="https://api.deepseek.com") if (OPENAI_AVAILABLE and DEEPSEEK_API_KEY) else None
         
-        # Sesión HTTP (Inicializada en setup_hook para evitar errores de loop)
+        # Sesión HTTP (Inicializada en setup_hook)
         self.session = None
 
     def load_json(self, path):
@@ -263,13 +263,11 @@ class FmdBot(discord.Client):
             json.dump(data, f, indent=4)
 
     async def setup_hook(self):
-        # Iniciar sesión de aiohttp correctamente dentro de un contexto async
         self.session = aiohttp.ClientSession()
         await self.tree.sync()
         logger.info(f"{EMOJIS['success']} Comandos globales sincronizados.")
 
     async def close(self):
-        # Cerrar la sesión limpia al apagar el bot
         if self.session:
             await self.session.close()
         await super().close()
@@ -284,17 +282,17 @@ class FmdBot(discord.Client):
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild: return
         
-        # Lógica de IA automática
-        if message.channel.id in self.ai_channels and self.groq_client:
+        # Lógica de IA automática (DeepSeek)
+        if message.channel.id in self.ai_channels and self.ai_client:
             if not message.content.startswith('/'):
                 try:
                     async with message.channel.typing():
-                        completion = await self.groq_client.chat.completions.create(
+                        completion = await self.ai_client.chat.completions.create(
                             messages=[
                                 {"role": "system", "content": "Eres un asistente útil y amigable en Discord. Responde de forma concisa y divertida."},
                                 {"role": "user", "content": message.content}
                             ],
-                            model="llama3-8b-8192",
+                            model="deepseek-chat",
                             temperature=0.7,
                             max_tokens=150
                         )
@@ -1034,8 +1032,8 @@ async def password(interaction: discord.Interaction, longitud: int = 16):
 @bot.tree.command(name="setupia", description="Configura IA automática en este canal")
 @app_commands.checks.has_permissions(manage_channels=True)
 async def setupia(interaction: discord.Interaction):
-    if not bot.groq_client:
-        return await interaction.response.send_message(f"{EMOJIS['error']} La API de Groq no está configurada.", ephemeral=True)
+    if not bot.ai_client:
+        return await interaction.response.send_message(f"{EMOJIS['error']} La API de DeepSeek no está configurada. Agrega DEEPSEEK_API_KEY a las variables.", ephemeral=True)
     channel_id = interaction.channel.id
     if channel_id in bot.ai_channels:
         bot.ai_channels.remove(channel_id)
@@ -1046,16 +1044,16 @@ async def setupia(interaction: discord.Interaction):
 
 @bot.tree.command(name="chat", description="Habla con la IA manualmente")
 async def chat(interaction: discord.Interaction, mensaje: str):
-    if not bot.groq_client:
-        return await interaction.response.send_message(f"{EMOJIS['error']} La API de Groq no está configurada.", ephemeral=True)
+    if not bot.ai_client:
+        return await interaction.response.send_message(f"{EMOJIS['error']} La API de DeepSeek no está configurada.", ephemeral=True)
     await interaction.response.defer()
     try:
-        completion = await bot.groq_client.chat.completions.create(
+        completion = await bot.ai_client.chat.completions.create(
             messages=[
                 {"role": "system", "content": "Eres un asistente útil en Discord."},
                 {"role": "user", "content": mensaje}
             ],
-            model="llama3-8b-8192",
+            model="deepseek-chat",
             temperature=0.7,
             max_tokens=200
         )
@@ -1064,7 +1062,7 @@ async def chat(interaction: discord.Interaction, mensaje: str):
     except Exception as e:
         await interaction.followup.send(f"{EMOJIS['error']} Error en la IA: {e}", ephemeral=True)
 
-# ── HEALTH SERVER (Para Render) ─────────────────────────────────
+# ── HEALTH SERVER (Para UptimeRobot y Render) ──────────────────
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         body = f'{{"status":"online","bot":"FMD BOT","uptime":"{_uptime()}"}}'.encode()
