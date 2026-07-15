@@ -427,6 +427,13 @@ class _HealthHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
+
+    def do_HEAD(self):
+        # Soluciona el error 501 de UptimeRobot
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+
     def log_message(self, *_): pass
 
 def start_web():
