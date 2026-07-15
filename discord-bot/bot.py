@@ -43,11 +43,10 @@ VPS_BYPASS_RETRY_DELAY = 3
 
 AUTOBYPASS_CHANNELS_FILE = "autobypass_channels.json"
 
-# ── NUEVOS EMOJIS PERSONALIZADOS (SIN UNICODE, SOLO IDs) ──────
+# ── NUEVOS EMOJIS PERSONALIZADOS (SIN UNICODE, EXCEPTO 📱) ────
 # Formato Normal: <:Nombre:ID>
 # Formato Animado: <a:Nombre:ID>
 
-# Emojis para usar en texto de Embeds
 EMOJI_GREEN_DOT = "<a:fmd_green_dot:1526742445323190272>"
 EMOJI_LOADER    = "<a:fmd_loader:1526741970226253834>"
 EMOJI_CROWN     = "<a:fmd_crown:1526742765311098980>"
@@ -55,15 +54,15 @@ EMOJI_KEY       = "<:fmd_key:1526743159038803978>"
 EMOJI_CLOCK     = "<a:fmd_clock:1525380296852377711>"
 EMOJI_SUCCESS   = "<:fmd_success:1526742163050991616>"
 
-# Emojis para usar en los Botones (se necesita objeto PartialEmoji)
-EMOJI_COPY_OBJ = discord.PartialEmoji(name="fmd_copy", id=1526743644894138479)
+# Emojis para Botones
+EMOJI_COPY_OBJ    = discord.PartialEmoji(name="fmd_copy", id=1526743644894138479)
 EMOJI_DISCORD_OBJ = discord.PartialEmoji(name="fmd_discord", id=1526743527642501273)
-EMOJI_INVITE_OBJ = discord.PartialEmoji(name="fmd_invite", id=1526743390488756236)
+EMOJI_INVITE_OBJ  = discord.PartialEmoji(name="fmd_invite", id=1526743390488756236)
 
 # ── COLORES ──────────────────────────────────────────────────────
-C_GREEN  = 0x00FF66  # Verde neón elegante
-C_WARN   = 0xFFA500  # Naranja para carga
-C_ERROR  = 0xED4245  # Rojo para errores
+C_GREEN  = 0x00FF66  # Neon Green Premium
+C_WARN   = 0xFFA500  # Naranja
+C_ERROR  = 0xED4245  # Rojo
 
 # ── HELPERS ──────────────────────────────────────────────────────
 BOT_START_TIME = datetime.now(timezone.utc)
@@ -80,17 +79,13 @@ def _uptime() -> str:
     return f"{h}h {m}m {s}s"
 
 def _footer() -> str:
-    return "Made by KING • FMD BOT • BYPASS"
+    return "Made by KING\nFMD BOT • BYPASS"
 
-def _get_platform(interaction: discord.Interaction) -> tuple:
-    """
-    Detecta si el usuario está en PC o Móvil.
-    Retorna: (Texto string) -> "PC" o "Mobile"
-    """
+def _get_platform(interaction: discord.Interaction) -> str:
     try:
         member = interaction.guild.get_member(interaction.user.id) if interaction.guild else None
         if member and member.is_on_mobile():
-            return "Mobile"
+            return "📱"  # Excepción explícita permitida para móvil
         else:
             return "PC"
     except Exception:
@@ -207,71 +202,84 @@ def save_json(path, data):
 
 autobypass_channels = load_json(AUTOBYPASS_CHANNELS_FILE, set())
 
-# ── EMBEDS (Diseño Verde Premium, SIN Unicode) ────────────────
+# ── EMBEDS (Diseño Premium Verde) ──────────────────────────────
 def embed_loading() -> discord.Embed:
     e = discord.Embed(color=C_WARN, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BOT • BYPASS", icon_url="")
     e.title = f"{EMOJI_LOADER} Generating Bypass..."
-    e.description = "Please wait..."
-    e.set_thumbnail(url="") # Omitimos la miniatura o podemos poner un placeholder vacío, pero usar el emoji personalizado en el título es suficiente.
+    e.description = "Please wait while we process your request."
+    e.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526741970226253834.gif") # Loader
     e.set_footer(text=_footer())
     return e
 
-def embed_success(result: str, elapsed: float, interaction: discord.Interaction) -> discord.Embed:
-    platform_text = _get_platform(interaction)
-    
+def embed_success(result: str, elapsed: float, platform: str) -> discord.Embed:
     e = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BOT • BYPASS", icon_url="")
-    e.title = f"{EMOJI_GREEN_DOT} FMD BOT • BYPASS"
-    e.description = "Generated successfully • Auto delete in 120 seconds"
-    e.set_thumbnail(url="") # Sin imagen, solo el texto del título y el autor.
+    e.title = f"{EMOJI_GREEN_DOT} Bypass Completed"
+    e.description = "Generated successfully"
+    e.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526742765311098980.gif") # Corona obligatoria
     
     e.add_field(name=f"{EMOJI_KEY} Result", value=f"```txt\n{result[:900]}\n```", inline=False)
     e.add_field(name=f"{EMOJI_CLOCK} Duration", value=f"`{elapsed:.2f}s`", inline=True)
     e.add_field(name=f"{EMOJI_SUCCESS} Status", value="Successfully Generated", inline=True)
-    e.add_field(name="Platform", value=platform_text, inline=True)
+    e.add_field(name="Platform", value=platform, inline=True)
     
     e.set_footer(text=_footer())
     return e
 
-def embed_fail(error: str, elapsed: float, interaction: discord.Interaction) -> discord.Embed:
-    platform_text = _get_platform(interaction)
-    
+def embed_fail(error: str, elapsed: float, platform: str) -> discord.Embed:
     e = discord.Embed(color=C_ERROR, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BOT • BYPASS", icon_url="")
-    e.title = f"{EMOJI_GREEN_DOT} FMD BOT • BYPASS"
+    e.title = f"{EMOJI_GREEN_DOT} Bypass Failed"
     e.description = "Something went wrong!"
-    e.set_thumbnail(url="")
+    e.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526742765311098980.gif")
     
     e.add_field(name="Error", value=f"```\n{error or 'Unknown error'}\n```", inline=False)
     e.add_field(name=f"{EMOJI_CLOCK} Duration", value=f"`{elapsed:.2f}s`", inline=True)
-    e.add_field(name="Platform", value=platform_text, inline=True)
+    e.add_field(name="Platform", value=platform, inline=True)
     
     e.set_footer(text=_footer())
     return e
 
-# ── VIEW (Solo 3 Botones con EMOJIS PERSONALIZADOS) ────────────
+# ── VIEW (SOLO 3 BOTONES) ──────────────────────────────────────
 class FmdBypassView(View):
     def __init__(self, result: str):
         super().__init__(timeout=None)
         self._result = result
         
-        # Botón de Discord (Link)
         self.add_item(Button(label="Discord", emoji=EMOJI_DISCORD_OBJ, url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link, row=0))
-        # Botón de Invite (Link)
         self.add_item(Button(label="Invite", emoji=EMOJI_INVITE_OBJ, url=BOT_INVITE_URL, style=discord.ButtonStyle.link, row=0))
 
-    @discord.ui.button(label="Copy", emoji=EMOJI_COPY_OBJ, style=discord.ButtonStyle.success, row=0)
-    async def copy_btn(self, interaction: discord.Interaction, button: Button):
-        # El bloque de código permite copiar con un clic en móvil y PC
+    @discord.ui.button(emoji=EMOJI_COPY_OBJ, label="Copy", style=discord.ButtonStyle.success, row=0)
+    async def copy_button(self, interaction: discord.Interaction, button: Button):
         await interaction.response.send_message(
-            f"```txt\n{self._result}\n```\nCopied Successfully!",
+            f"{EMOJI_SUCCESS} Copied Successfully!",
             ephemeral=True
         )
 
-# ── AUTO ELIMINACIÓN (120 segundos) ────────────────────────────
-async def auto_delete_msg(message: discord.Message, delay: int = 120):
-    await asyncio.sleep(delay)
+# ── CUENTA REGRESIVA EN VIVO Y AUTO ELIMINACIÓN ────────────────
+async def start_countdown(message: discord.Message, base_embed: discord.Embed, view: View, seconds: int = 120):
+    clock_emoji = EMOJI_CLOCK
+    while seconds > 0:
+        try:
+            new_embed = base_embed.copy()
+            
+            # Buscamos y actualizamos el campo de Auto Delete
+            field_updated = False
+            for i, field in enumerate(new_embed.fields):
+                if field.name == f"{clock_emoji} Auto Delete":
+                    new_embed.set_field_at(i, name=field.name, value=f"Message expires in: `{seconds}s`", inline=field.inline)
+                    field_updated = True
+                    break
+            
+            # Si no existe (primer tick), lo agregamos
+            if not field_updated:
+                new_embed.add_field(name=f"{clock_emoji} Auto Delete", value=f"Message expires in: `{seconds}s`", inline=False)
+            
+            await message.edit(embed=new_embed, view=view)
+            await asyncio.sleep(1)
+            seconds -= 1
+        except (discord.NotFound, discord.HTTPException):
+            break
+            
+    # Al llegar a 0, eliminar mensaje
     try:
         await message.delete()
     except Exception:
@@ -326,28 +334,14 @@ class FmdBot(discord.Client):
 
             try:
                 if result:
-                    embed = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
-                    embed.set_author(name="FMD BOT • BYPASS", icon_url="")
-                    embed.title = f"{EMOJI_GREEN_DOT} FMD BOT • BYPASS"
-                    embed.description = "Generated successfully • Auto delete in 120 seconds"
-                    embed.set_thumbnail(url="")
-                    embed.add_field(name=f"{EMOJI_KEY} Result", value=f"```txt\n{result[:900]}\n```", inline=False)
-                    embed.add_field(name=f"{EMOJI_CLOCK} Duration", value=f"`{elapsed:.2f}s`", inline=True)
-                    embed.add_field(name=f"{EMOJI_SUCCESS} Status", value="Successfully Generated", inline=True)
-                    embed.add_field(name="Platform", value="Auto-Bypass", inline=True)
-                    embed.set_footer(text=_footer())
-
-                    msg = await status_msg.edit(
-                        content=message.author.mention,
-                        embed=embed,
-                        view=FmdBypassView(result)
-                    )
+                    embed = embed_success(result, elapsed, platform="Auto-Bypass")
+                    view = FmdBypassView(result)
+                    msg = await status_msg.edit(content=message.author.mention, embed=embed, view=view)
+                    asyncio.create_task(start_countdown(msg, embed, view))
                 else:
-                    msg = await status_msg.edit(
-                        content=message.author.mention,
-                        embed=embed_fail(error, elapsed, None) 
-                    )
-                asyncio.create_task(auto_delete_msg(msg, 120))
+                    embed = embed_fail(error, elapsed, platform="Auto-Bypass")
+                    msg = await status_msg.edit(content=message.author.mention, embed=embed)
+                    asyncio.create_task(start_countdown(msg, embed, View()))
             except Exception:
                 pass
 
@@ -371,15 +365,16 @@ async def cmd_bypass(interaction: discord.Interaction, url: str):
 
     try:
         if result:
-            msg = await interaction.edit_original_response(
-                embed=embed_success(result, elapsed, interaction),
-                view=FmdBypassView(result)
-            )
+            platform = _get_platform(interaction)
+            embed = embed_success(result, elapsed, platform)
+            view = FmdBypassView(result)
+            msg = await interaction.edit_original_response(embed=embed, view=view)
+            asyncio.create_task(start_countdown(msg, embed, view))
         else:
-            msg = await interaction.edit_original_response(
-                embed=embed_fail(error, elapsed, interaction)
-            )
-        asyncio.create_task(auto_delete_msg(msg, 120))
+            platform = _get_platform(interaction)
+            embed = embed_fail(error, elapsed, platform)
+            msg = await interaction.edit_original_response(embed=embed)
+            asyncio.create_task(start_countdown(msg, embed, View()))
     except Exception as e:
         logger.error(f"Error al editar respuesta: {e}")
 
