@@ -391,11 +391,25 @@ async def cmd_channelinfo(interaction: discord.Interaction, channel: discord.Tex
     ]))
 
 @bot.tree.command(name="emojiinfo", description="🎴 Información de un emoji")
-async def cmd_emojiinfo(interaction: discord.Interaction, emoji: discord.Emoji):
-    await interaction.response.send_message(embed=create_cmd_embed(f"Emoji: {emoji.name}", [
-        ("ID", f"`{emoji.id}`", True), ("Animated", "Yes" if emoji.animated else "No", True),
-        ("Created", f"<t:{int(emoji.created_at.timestamp())}:R>", True), ("Guild", f"`{emoji.guild.name}`", True)
-    ]))
+async def cmd_emojiinfo(interaction: discord.Interaction, emoji: str):
+    await interaction.response.defer()
+    try:
+        partial = discord.PartialEmoji.from_str(emoji)
+        e = create_cmd_embed(f"Emoji Info", [
+            ("Name", f"`{partial.name or 'N/A'}`", True),
+            ("ID", f"`{partial.id}`" if partial.id else "`None`", True),
+            ("Animated", "Yes" if partial.animated else "No", True)
+        ])
+        if partial.id:
+            e.set_thumbnail(url=partial.url)
+        await interaction.followup.send(embed=e)
+    except Exception:
+        e = create_cmd_embed("Emoji Info", [
+            ("Name", "Unicode Emoji", True),
+            ("Raw", emoji, False),
+            ("Note", "Discord API does not return metadata for Unicode emojis.", False)
+        ])
+        await interaction.followup.send(embed=e)
 
 @bot.tree.command(name="servericon", description="🏰 Muestra el icono del servidor")
 async def cmd_servericon(interaction: discord.Interaction):
@@ -540,7 +554,6 @@ async def cmd_embed(interaction: discord.Interaction, title: str, description: s
 # ══════════════════════════════════════════════════════════════════
 #  🛡️ MODERACIÓN (12 Comandos)
 # ══════════════════════════════════════════════════════════════════
-# (Solo usuarios con permisos podrán ejecutarlos)
 
 @bot.tree.command(name="clear", description="🗑️ Elimina mensajes (1-100)")
 @app_commands.checks.has_permissions(manage_messages=True)
@@ -842,7 +855,6 @@ async def cmd_blush(interaction: discord.Interaction, member: discord.Member):
 async def cmd_ai_chat(interaction: discord.Interaction, prompt: str):
     await interaction.response.defer()
     try:
-        # Usamos la API de Groq si el usuario la tiene, sino devolvemos un placeholder.
         from groq import AsyncGroq
         client = AsyncGroq(api_key=os.environ.get("GROQ_API_KEY"))
         response = await client.chat.completions.create(model="llama3-8b-8192", messages=[{"role": "user", "content": prompt}], max_tokens=300)
