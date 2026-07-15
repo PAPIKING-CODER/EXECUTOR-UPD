@@ -1,0 +1,201 @@
+Create a private owner dashboard website for my Discord bot.
+
+IMPORTANT:
+
+- Do NOT modify or break the existing Discord bot code.
+- Keep all current bot features working.
+- The website must connect to the existing bot using an API/backend.
+- Create it as a separate dashboard system.
+
+Project
+
+Name:
+
+FMD BOT OWNER PANEL
+
+Creator:
+
+Made by KING
+
+Purpose:
+
+A private control panel to manage and monitor the Discord bot.
+
+Main Features
+
+Owner Login
+
+Create a secure owner-only login system.
+
+Only authorized owners can access the dashboard.
+
+Use:
+
+- Discord OAuth2 login or secure admin authentication.
+- Environment variables for secrets.
+
+Dashboard Home
+
+Show:
+
+- Bot status (Online/Offline)
+- Bot uptime
+- Latency
+- Discord API status
+- CPU usage
+- RAM usage
+- Python/Node version
+- Number of servers
+- Number of users
+- Number of channels
+
+Add animated statistics cards.
+
+Server Management
+
+Create a page showing all servers where the bot is installed.
+
+Display:
+
+- Server name
+- Server ID
+- Server icon
+- Owner ID
+- Member count
+- Join date
+- Bot permissions
+
+Actions:
+
+- View server information
+- Leave server
+- Search servers
+
+Blacklist System
+
+Create a complete blacklist manager.
+
+Blacklist types:
+
+- User blacklist
+- Server blacklist
+- Word blacklist
+
+Features:
+
+- Add blacklist
+- Remove blacklist
+- View blacklist
+- Reason for blacklist
+- Date added
+- Added by
+
+When a blacklisted user/server appears:
+
+- Bot automatically blocks access.
+
+Bot Controls
+
+Create controls:
+
+- Restart bot
+- Maintenance mode
+- Enable/disable commands
+- Change bot status
+- Send global announcement
+
+Logs System
+
+Show real-time logs:
+
+- Commands used
+- Errors
+- Joins/leaves
+- Moderation actions
+- API requests
+
+Use:
+
+- Search
+- Filters
+- Date sorting
+
+Command Management
+
+Panel to view:
+
+- All commands
+- Command usage
+- Enable/disable commands
+- Command permissions
+
+Statistics
+
+Charts:
+
+- Servers growth
+- Users growth
+- Commands used
+- Most used commands
+
+Add smooth animations.
+
+Design
+
+Style:
+
+- Premium dark theme.
+- Green neon accents.
+- Discord inspired.
+- Glass cards.
+- Smooth animations.
+- Responsive for mobile.
+
+Use:
+
+Frontend:
+
+- React
+- Tailwind CSS
+- Framer Motion
+
+Backend:
+
+- Express/FastAPI API
+
+Security
+
+Important:
+
+- Never expose bot token.
+- Use environment variables.
+- Add authentication.
+- Protect owner routes.
+- Validate all requests.
+
+Deployment
+
+Prepare for Render.
+
+Create:
+
+- Separate dashboard folder.
+- package.json
+- requirements if needed.
+- README setup.
+
+Structure:
+
+/bot
+(existing bot files)
+
+/dashboard
+(owner panel files)
+
+Do not overwrite existing bot files.
+
+Final Goal
+
+Create a professional owner control panel like large Discord bots have.
+
+The owner should be able to monitor, manage, blacklist, and control the bot from the website.
