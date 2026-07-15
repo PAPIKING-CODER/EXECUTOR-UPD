@@ -1,45 +1,67 @@
-# [Project name]
+# FMD BOT OWNER PANEL
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+Panel de control privado para el bot de Discord FMD BOT. Permite al owner monitorear, moderar y controlar el bot desde una interfaz web premium con tema oscuro y acentos verde neón.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
-- `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- `pnpm --filter @workspace/api-server run dev` — API server (port 8080)
+- `pnpm --filter @workspace/dashboard run dev` — Frontend panel (port assigned by workflow)
+- `pnpm run typecheck` — typecheck completo
+- `pnpm --filter @workspace/api-spec run codegen` — regenerar hooks y schemas del OpenAPI
+- `pnpm --filter @workspace/db run push` — aplicar cambios de schema a la DB
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
+- Frontend: React + Vite, Tailwind CSS, Framer Motion, Recharts, Wouter
+- API: Express 5 + express-session
 - DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Auth: Discord OAuth2 (sessions)
+- Codegen: Orval (OpenAPI → React Query hooks + Zod schemas)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/dashboard/` — Frontend (React + Vite)
+- `artifacts/api-server/` — Backend Express API
+- `lib/api-spec/openapi.yaml` — Contrato OpenAPI (fuente de verdad)
+- `lib/db/src/schema/` — Schema de DB (blacklist, logs, commands, bot-settings, guilds)
 
-## Architecture decisions
+## Required Secrets
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- `DISCORD_BOT_TOKEN` — Token del bot (para stats reales de Discord)
+- `DISCORD_CLIENT_ID` — Client ID de la app de Discord (para OAuth2)
+- `DISCORD_CLIENT_SECRET` — Client Secret de la app de Discord (para OAuth2)
+- `SESSION_SECRET` — Ya configurado
+- `OWNER_IDS` — IDs de Discord separados por coma (ej: `123456,789012`) que tienen acceso al panel. Si está vacío, cualquier usuario autenticado puede entrar.
 
-## Product
+## Discord OAuth2 Setup
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+1. Ve a https://discord.com/developers/applications
+2. Selecciona tu app → OAuth2
+3. Agrega como Redirect URI: `https://TU-DOMINIO/api/auth/discord/callback`
+4. Configura `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`
+
+## Bot Integration
+
+El bot Python puede enviar logs al panel via:
+```
+POST /api/logs
+Content-Type: application/json
+{"type": "command", "message": "...", "guildId": "...", "userId": "..."}
+```
+
+## Pages
+
+- `/` — Login con Discord OAuth2
+- `/dashboard` — Stats del bot en tiempo real
+- `/servers` — Gestión de servidores
+- `/blacklist` — Blacklist de usuarios/servidores/palabras
+- `/logs` — Logs de actividad con filtros
+- `/commands` — Gestión de comandos
+- `/stats` — Estadísticas y gráficas
+- `/settings` — Controles del bot
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
-
-## Gotchas
-
-_Populate as you build — sharp edges, "always run X before Y" rules._
-
-## Pointers
-
-- See the `pnpm-workspace` skill for workspace structure, TypeScript setup, and package details
+- Proyecto: FMD BOT OWNER PANEL, creado por KING
+- Bot en Python alojado en https://github.com/PAPIKING-CODER/EXECUTOR-UPD

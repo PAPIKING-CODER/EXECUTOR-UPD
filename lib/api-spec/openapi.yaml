@@ -1,22 +1,35 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: FMD BOT OWNER PANEL API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: auth
+    description: Authentication
+  - name: bot
+    description: Bot information and controls
+  - name: guilds
+    description: Server/Guild management
+  - name: blacklist
+    description: Blacklist management
+  - name: logs
+    description: Activity logs
+  - name: commands
+    description: Command management
+  - name: stats
+    description: Statistics and charts
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +37,381 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Authenticated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthUser"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current user
+      responses:
+        "200":
+          description: Logged out
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /bot/stats:
+    get:
+      operationId: getBotStats
+      tags: [bot]
+      summary: Get bot statistics
+      responses:
+        "200":
+          description: Bot stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotStats"
+
+  /bot/settings:
+    get:
+      operationId: getBotSettings
+      tags: [bot]
+      summary: Get bot settings
+      responses:
+        "200":
+          description: Bot settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotSettings"
+    patch:
+      operationId: updateBotSettings
+      tags: [bot]
+      summary: Update bot settings (maintenance, status, etc.)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BotSettingsUpdate"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BotSettings"
+
+  /bot/restart:
+    post:
+      operationId: restartBot
+      tags: [bot]
+      summary: Signal bot restart
+      responses:
+        "200":
+          description: Restart signaled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /bot/announcement:
+    post:
+      operationId: sendAnnouncement
+      tags: [bot]
+      summary: Send a global announcement
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AnnouncementInput"
+      responses:
+        "200":
+          description: Announcement sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /guilds:
+    get:
+      operationId: listGuilds
+      tags: [guilds]
+      summary: List all guilds the bot is in
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: List of guilds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GuildList"
+
+  /guilds/{guildId}:
+    get:
+      operationId: getGuild
+      tags: [guilds]
+      summary: Get guild details
+      parameters:
+        - name: guildId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Guild details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Guild"
+        "404":
+          description: Guild not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: leaveGuild
+      tags: [guilds]
+      summary: Leave a guild
+      parameters:
+        - name: guildId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Left guild
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /blacklist:
+    get:
+      operationId: listBlacklist
+      tags: [blacklist]
+      summary: List blacklist entries
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [user, server, word]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: Blacklist entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlacklistEntryList"
+    post:
+      operationId: addBlacklist
+      tags: [blacklist]
+      summary: Add a blacklist entry
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BlacklistEntryInput"
+      responses:
+        "201":
+          description: Entry added
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlacklistEntry"
+
+  /blacklist/{id}:
+    delete:
+      operationId: removeBlacklist
+      tags: [blacklist]
+      summary: Remove a blacklist entry
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Entry removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessResponse"
+
+  /logs:
+    get:
+      operationId: listLogs
+      tags: [logs]
+      summary: List activity logs
+      parameters:
+        - name: type
+          in: query
+          schema:
+            type: string
+            enum: [command, error, join, leave, moderation, api]
+        - name: search
+          in: query
+          schema:
+            type: string
+        - name: dateFrom
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: dateTo
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Log entries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogEntryList"
+    post:
+      operationId: createLog
+      tags: [logs]
+      summary: Create a log entry (called by bot)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LogEntryInput"
+      responses:
+        "201":
+          description: Log created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LogEntry"
+
+  /commands:
+    get:
+      operationId: listCommands
+      tags: [commands]
+      summary: List all bot commands
+      responses:
+        "200":
+          description: Command list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Command"
+
+  /commands/{name}:
+    patch:
+      operationId: updateCommand
+      tags: [commands]
+      summary: Enable or disable a command
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CommandUpdate"
+      responses:
+        "200":
+          description: Command updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Command"
+
+  /stats/overview:
+    get:
+      operationId: getStatsOverview
+      tags: [stats]
+      summary: Get statistics for charts (growth, command usage)
+      responses:
+        "200":
+          description: Statistics overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsOverview"
+
+  /stats/top-commands:
+    get:
+      operationId: getTopCommands
+      tags: [stats]
+      summary: Get most used commands
+      responses:
+        "200":
+          description: Top commands
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CommandStat"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +419,303 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    SuccessResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+      required: [success]
+
+    AuthUser:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        discriminator:
+          type: string
+        avatar:
+          type: ["string", "null"]
+        isOwner:
+          type: boolean
+      required: [id, username, discriminator, avatar, isOwner]
+
+    BotStats:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [online, offline, idle, dnd]
+        uptime:
+          type: integer
+          description: Uptime in seconds
+        latency:
+          type: integer
+          description: Latency in ms
+        guildCount:
+          type: integer
+        userCount:
+          type: integer
+        channelCount:
+          type: integer
+        cpuUsage:
+          type: number
+        ramUsage:
+          type: number
+        ramTotal:
+          type: number
+        pythonVersion:
+          type: string
+        discordApiStatus:
+          type: string
+          enum: [operational, degraded, outage]
+      required: [status, uptime, latency, guildCount, userCount, channelCount, cpuUsage, ramUsage, ramTotal, pythonVersion, discordApiStatus]
+
+    BotSettings:
+      type: object
+      properties:
+        maintenanceMode:
+          type: boolean
+        statusText:
+          type: string
+        statusType:
+          type: string
+          enum: [playing, watching, listening, streaming]
+        disabledCommands:
+          type: array
+          items:
+            type: string
+      required: [maintenanceMode, statusText, statusType, disabledCommands]
+
+    BotSettingsUpdate:
+      type: object
+      properties:
+        maintenanceMode:
+          type: boolean
+        statusText:
+          type: string
+        statusType:
+          type: string
+          enum: [playing, watching, listening, streaming]
+
+    AnnouncementInput:
+      type: object
+      properties:
+        message:
+          type: string
+        targetGuildId:
+          type: ["string", "null"]
+      required: [message]
+
+    Guild:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        icon:
+          type: ["string", "null"]
+        ownerId:
+          type: string
+        memberCount:
+          type: integer
+        joinedAt:
+          type: ["string", "null"]
+        permissions:
+          type: string
+        features:
+          type: array
+          items:
+            type: string
+      required: [id, name, icon, ownerId, memberCount, joinedAt, permissions, features]
+
+    GuildList:
+      type: object
+      properties:
+        guilds:
+          type: array
+          items:
+            $ref: "#/components/schemas/Guild"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required: [guilds, total, page, limit]
+
+    BlacklistEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [user, server, word]
+        targetId:
+          type: string
+        targetName:
+          type: ["string", "null"]
+        reason:
+          type: ["string", "null"]
+        addedBy:
+          type: string
+        addedAt:
+          type: string
+          format: date-time
+      required: [id, type, targetId, targetName, reason, addedBy, addedAt]
+
+    BlacklistEntryInput:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [user, server, word]
+        targetId:
+          type: string
+        targetName:
+          type: ["string", "null"]
+        reason:
+          type: ["string", "null"]
+      required: [type, targetId]
+
+    BlacklistEntryList:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/BlacklistEntry"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required: [entries, total, page, limit]
+
+    LogEntry:
+      type: object
+      properties:
+        id:
+          type: integer
+        type:
+          type: string
+          enum: [command, error, join, leave, moderation, api]
+        message:
+          type: string
+        guildId:
+          type: ["string", "null"]
+        userId:
+          type: ["string", "null"]
+        metadata:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, type, message, guildId, userId, metadata, createdAt]
+
+    LogEntryInput:
+      type: object
+      properties:
+        type:
+          type: string
+          enum: [command, error, join, leave, moderation, api]
+        message:
+          type: string
+        guildId:
+          type: ["string", "null"]
+        userId:
+          type: ["string", "null"]
+        metadata:
+          type: ["string", "null"]
+      required: [type, message]
+
+    LogEntryList:
+      type: object
+      properties:
+        logs:
+          type: array
+          items:
+            $ref: "#/components/schemas/LogEntry"
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+      required: [logs, total, page, limit]
+
+    Command:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        enabled:
+          type: boolean
+        usageCount:
+          type: integer
+        permissions:
+          type: string
+      required: [name, description, category, enabled, usageCount, permissions]
+
+    CommandUpdate:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+      required: [enabled]
+
+    StatsOverview:
+      type: object
+      properties:
+        serverGrowth:
+          type: array
+          items:
+            $ref: "#/components/schemas/GrowthPoint"
+        commandUsage:
+          type: array
+          items:
+            $ref: "#/components/schemas/GrowthPoint"
+        userGrowth:
+          type: array
+          items:
+            $ref: "#/components/schemas/GrowthPoint"
+      required: [serverGrowth, commandUsage, userGrowth]
+
+    GrowthPoint:
+      type: object
+      properties:
+        date:
+          type: string
+        value:
+          type: integer
+      required: [date, value]
+
+    CommandStat:
+      type: object
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+        percentage:
+          type: number
+      required: [name, count, percentage]
