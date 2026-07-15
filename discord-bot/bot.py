@@ -43,17 +43,25 @@ VPS_BYPASS_RETRY_DELAY = 3
 
 AUTOBYPASS_CHANNELS_FILE = "autobypass_channels.json"
 
-# ── TUS EMOJIS (TODOS USADOS) ─────────────────────────────────
-URL_GREEN_DOT = "https://cdn.discordapp.com/emojis/1425942717208199389.webp?size=100&animated=true"
-URL_CROWN     = "https://cdn.discordapp.com/emojis/1511381348433264851.webp?size=100&animated=true"
-URL_KEY       = "https://cdn.discordapp.com/emojis/1525381310200414310.webp?size=100"
-URL_CLOCK     = "https://cdn.discordapp.com/emojis/1525380296852377711.webp?size=100&animated=true"
-URL_SUCCESS   = "https://cdn.discordapp.com/emojis/1502854400769790003.webp?size=100"
-URL_PC        = "https://cdn.discordapp.com/emojis/1516371549471506435.webp?size=100"
-URL_LOADER    = "https://cdn.discordapp.com/emojis/1493714096795943063.webp?size=100&animated=true"
+# ── NUEVOS EMOJIS PERSONALIZADOS (SIN UNICODE, SOLO IDs) ──────
+# Formato Normal: <:Nombre:ID>
+# Formato Animado: <a:Nombre:ID>
+
+# Emojis para usar en texto de Embeds
+EMOJI_GREEN_DOT = "<a:fmd_green_dot:1526742445323190272>"
+EMOJI_LOADER    = "<a:fmd_loader:1526741970226253834>"
+EMOJI_CROWN     = "<a:fmd_crown:1526742765311098980>"
+EMOJI_KEY       = "<:fmd_key:1526743159038803978>"
+EMOJI_CLOCK     = "<a:fmd_clock:1525380296852377711>"
+EMOJI_SUCCESS   = "<:fmd_success:1526742163050991616>"
+
+# Emojis para usar en los Botones (se necesita objeto PartialEmoji)
+EMOJI_COPY_OBJ = discord.PartialEmoji(name="fmd_copy", id=1526743644894138479)
+EMOJI_DISCORD_OBJ = discord.PartialEmoji(name="fmd_discord", id=1526743527642501273)
+EMOJI_INVITE_OBJ = discord.PartialEmoji(name="fmd_invite", id=1526743390488756236)
 
 # ── COLORES ──────────────────────────────────────────────────────
-C_GREEN  = 0x00FF66  # Verde neón elegante (pedido)
+C_GREEN  = 0x00FF66  # Verde neón elegante
 C_WARN   = 0xFFA500  # Naranja para carga
 C_ERROR  = 0xED4245  # Rojo para errores
 
@@ -77,17 +85,16 @@ def _footer() -> str:
 def _get_platform(interaction: discord.Interaction) -> tuple:
     """
     Detecta si el usuario está en PC o Móvil.
-    Retorna: (Emoji string, Texto string)
+    Retorna: (Texto string) -> "PC" o "Mobile"
     """
     try:
-        # Intentamos obtener el miembro para verificar su estado móvil
         member = interaction.guild.get_member(interaction.user.id) if interaction.guild else None
         if member and member.is_on_mobile():
-            return "📱", "Mobile"
+            return "Mobile"
         else:
-            return "🖥️", "PC"
+            return "PC"
     except Exception:
-        return "🖥️", "PC"
+        return "PC"
 
 # ── MOTOR DE BYPASS (Robusto) ──────────────────────────────────
 _http_session = requests.Session()
@@ -200,65 +207,65 @@ def save_json(path, data):
 
 autobypass_channels = load_json(AUTOBYPASS_CHANNELS_FILE, set())
 
-# ── EMBEDS (Diseño Verde Premium) ──────────────────────────────
+# ── EMBEDS (Diseño Verde Premium, SIN Unicode) ────────────────
 def embed_loading() -> discord.Embed:
     e = discord.Embed(color=C_WARN, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
-    e.title = "⏳ Generating Bypass..."
+    e.set_author(name="FMD BOT • BYPASS", icon_url="")
+    e.title = f"{EMOJI_LOADER} Generating Bypass..."
     e.description = "Please wait..."
-    e.set_thumbnail(url=URL_LOADER)
+    e.set_thumbnail(url="") # Omitimos la miniatura o podemos poner un placeholder vacío, pero usar el emoji personalizado en el título es suficiente.
     e.set_footer(text=_footer())
     return e
 
 def embed_success(result: str, elapsed: float, interaction: discord.Interaction) -> discord.Embed:
-    platform_emoji, platform_text = _get_platform(interaction)
+    platform_text = _get_platform(interaction)
     
     e = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
-    e.title = "🟢 Bypass Completed"
+    e.set_author(name="FMD BOT • BYPASS", icon_url="")
+    e.title = f"{EMOJI_GREEN_DOT} FMD BOT • BYPASS"
     e.description = "Generated successfully • Auto delete in 120 seconds"
-    e.set_thumbnail(url=URL_CROWN)  # Solo la corona como miniatura
+    e.set_thumbnail(url="") # Sin imagen, solo el texto del título y el autor.
     
-    e.add_field(name="🔑 Result", value=f"```txt\n{result[:900]}\n```", inline=False)
-    e.add_field(name="🕒 Duration", value=f"`{elapsed:.2f}s`", inline=True)
-    e.add_field(name="✅ Status", value="Successfully Generated", inline=True)
-    e.add_field(name=f"{platform_emoji} Platform", value=platform_text, inline=True)
+    e.add_field(name=f"{EMOJI_KEY} Result", value=f"```txt\n{result[:900]}\n```", inline=False)
+    e.add_field(name=f"{EMOJI_CLOCK} Duration", value=f"`{elapsed:.2f}s`", inline=True)
+    e.add_field(name=f"{EMOJI_SUCCESS} Status", value="Successfully Generated", inline=True)
+    e.add_field(name="Platform", value=platform_text, inline=True)
     
     e.set_footer(text=_footer())
     return e
 
 def embed_fail(error: str, elapsed: float, interaction: discord.Interaction) -> discord.Embed:
-    platform_emoji, platform_text = _get_platform(interaction)
+    platform_text = _get_platform(interaction)
     
     e = discord.Embed(color=C_ERROR, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
-    e.title = "🟢 Bypass Failed"
+    e.set_author(name="FMD BOT • BYPASS", icon_url="")
+    e.title = f"{EMOJI_GREEN_DOT} FMD BOT • BYPASS"
     e.description = "Something went wrong!"
-    e.set_thumbnail(url=URL_CROWN)
+    e.set_thumbnail(url="")
     
-    e.add_field(name="⚠️ Error", value=f"```\n{error or 'Unknown error'}\n```", inline=False)
-    e.add_field(name="🕒 Duration", value=f"`{elapsed:.2f}s`", inline=True)
-    e.add_field(name=f"{platform_emoji} Platform", value=platform_text, inline=True)
+    e.add_field(name="Error", value=f"```\n{error or 'Unknown error'}\n```", inline=False)
+    e.add_field(name=f"{EMOJI_CLOCK} Duration", value=f"`{elapsed:.2f}s`", inline=True)
+    e.add_field(name="Platform", value=platform_text, inline=True)
     
     e.set_footer(text=_footer())
     return e
 
-# ── VIEW (Solo 3 Botones) ──────────────────────────────────────
+# ── VIEW (Solo 3 Botones con EMOJIS PERSONALIZADOS) ────────────
 class FmdBypassView(View):
     def __init__(self, result: str):
         super().__init__(timeout=None)
         self._result = result
         
         # Botón de Discord (Link)
-        self.add_item(Button(label="Discord", emoji="💬", url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link, row=0))
+        self.add_item(Button(label="Discord", emoji=EMOJI_DISCORD_OBJ, url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link, row=0))
         # Botón de Invite (Link)
-        self.add_item(Button(label="Invite", emoji="➕", url=BOT_INVITE_URL, style=discord.ButtonStyle.link, row=0))
+        self.add_item(Button(label="Invite", emoji=EMOJI_INVITE_OBJ, url=BOT_INVITE_URL, style=discord.ButtonStyle.link, row=0))
 
-    @discord.ui.button(label="📋  Copy", style=discord.ButtonStyle.success, row=0)
+    @discord.ui.button(label="Copy", emoji=EMOJI_COPY_OBJ, style=discord.ButtonStyle.success, row=0)
     async def copy_btn(self, interaction: discord.Interaction, button: Button):
         # El bloque de código permite copiar con un clic en móvil y PC
         await interaction.response.send_message(
-            f"```txt\n{self._result}\n```\n✅ Copied Successfully!",
+            f"```txt\n{self._result}\n```\nCopied Successfully!",
             ephemeral=True
         )
 
@@ -319,18 +326,15 @@ class FmdBot(discord.Client):
 
             try:
                 if result:
-                    # Crear el mensaje de éxito (usamos la interacción de la mensajería, pasamos el mensaje original como objeto)
-                    # Para la detección de plataforma, necesitamos un objeto Interaction. 
-                    # Como esto es auto-bypass, usaremos un embed genérico sin la detección de plataforma, o asumimos PC.
                     embed = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
-                    embed.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
-                    embed.title = "🟢 Bypass Completed"
+                    embed.set_author(name="FMD BOT • BYPASS", icon_url="")
+                    embed.title = f"{EMOJI_GREEN_DOT} FMD BOT • BYPASS"
                     embed.description = "Generated successfully • Auto delete in 120 seconds"
-                    embed.set_thumbnail(url=URL_CROWN)
-                    embed.add_field(name="🔑 Result", value=f"```txt\n{result[:900]}\n```", inline=False)
-                    embed.add_field(name="🕒 Duration", value=f"`{elapsed:.2f}s`", inline=True)
-                    embed.add_field(name="✅ Status", value="Successfully Generated", inline=True)
-                    embed.add_field(name="🖥️ Platform", value="Auto-Bypass", inline=True)
+                    embed.set_thumbnail(url="")
+                    embed.add_field(name=f"{EMOJI_KEY} Result", value=f"```txt\n{result[:900]}\n```", inline=False)
+                    embed.add_field(name=f"{EMOJI_CLOCK} Duration", value=f"`{elapsed:.2f}s`", inline=True)
+                    embed.add_field(name=f"{EMOJI_SUCCESS} Status", value="Successfully Generated", inline=True)
+                    embed.add_field(name="Platform", value="Auto-Bypass", inline=True)
                     embed.set_footer(text=_footer())
 
                     msg = await status_msg.edit(
@@ -341,7 +345,7 @@ class FmdBot(discord.Client):
                 else:
                     msg = await status_msg.edit(
                         content=message.author.mention,
-                        embed=embed_fail(error, elapsed, None) # Fallback sin plataforma
+                        embed=embed_fail(error, elapsed, None) 
                     )
                 asyncio.create_task(auto_delete_msg(msg, 120))
             except Exception:
@@ -387,7 +391,7 @@ async def cmd_setautobypass(interaction: discord.Interaction):
         autobypass_channels.discard(cid)
         save_json(AUTOBYPASS_CHANNELS_FILE, autobypass_channels)
         e = discord.Embed(
-            title="🔴 Auto-Bypass DESACTIVADO",
+            title="Auto-Bypass DESACTIVADO",
             description=f"{interaction.channel.mention} ya no hará bypass automático.",
             color=C_ERROR
         )
@@ -395,27 +399,27 @@ async def cmd_setautobypass(interaction: discord.Interaction):
         autobypass_channels.add(cid)
         save_json(AUTOBYPASS_CHANNELS_FILE, autobypass_channels)
         e = discord.Embed(
-            title="🟢 Auto-Bypass ACTIVADO",
+            title="Auto-Bypass ACTIVADO",
             description=f"Cada enlace en {interaction.channel.mention} será bypasseado automáticamente.",
             color=C_GREEN
         )
-    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
+    e.set_author(name="FMD BOT • BYPASS", icon_url="")
     e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 @cmd_setautobypass.error
 async def _ab_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message("🚫 Necesitas permiso de **Administrador**!", ephemeral=True)
+        await interaction.response.send_message("🚫 Necesitas permiso de Administrador!", ephemeral=True)
 
 @bot.tree.command(name="ping", description="🏓 Ver la latencia del bot")
 async def cmd_ping(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
     e = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
-    e.set_author(name="FMD BOT • BYPASS", icon_url=URL_GREEN_DOT)
-    e.add_field(name="📡 Latencia", value=f"`{ms}ms`", inline=True)
-    e.add_field(name="⏰ Uptime", value=f"`{_uptime()}`", inline=True)
-    e.add_field(name="🏰 Servidores", value=f"`{len(bot.guilds)}`", inline=True)
+    e.set_author(name="FMD BOT • BYPASS", icon_url="")
+    e.add_field(name="Latencia", value=f"`{ms}ms`", inline=True)
+    e.add_field(name="Uptime", value=f"`{_uptime()}`", inline=True)
+    e.add_field(name="Servidores", value=f"`{len(bot.guilds)}`", inline=True)
     e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e)
 
