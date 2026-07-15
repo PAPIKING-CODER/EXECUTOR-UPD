@@ -207,7 +207,7 @@ class FmdBot(discord.Client):
     async def on_message(self, message: discord.Message):
         if message.author.bot:
             return
-        # AUTO-BYPASS
+        # AUTO-BYPASS (DETECCIÓN AUTOMÁTICA DE ENLACES)
         if message.channel.id in autobypass_channels:
             urls = _URL_RE.findall(message.content)
             if urls:
