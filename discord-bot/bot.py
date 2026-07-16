@@ -15,6 +15,7 @@ import discord
 from discord import app_commands
 from discord.ui import Button, View
 import requests
+import aiohttp
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -31,7 +32,7 @@ _console_handler.setFormatter(_fmt)
 logger.addHandler(_file_handler)
 logger.addHandler(_console_handler)
 
-# ── CONFIGURACIÓN ──────────────────────────────────────────────
+# ── CONFIGURATION ────────────────────────────────────────────────
 DISCORD_TOKEN      = os.environ.get("DISCORD_TOKEN", "")
 PORT               = int(os.environ.get("PORT", "8080"))
 SUPPORT_SERVER_URL = os.environ.get("SUPPORT_SERVER_URL", "https://discord.gg/nU9MNnByHH")
@@ -44,13 +45,18 @@ VPS_BYPASS_RETRY_DELAY = 3
 
 AUTOBYPASS_CHANNELS_FILE = "autobypass_channels.json"
 
-# Endpoint de GIFs (público, sin API key). Si tienes una API propia,
-# solo reemplaza GIF_API_BASE y ajusta _fetch_gif().
+# Reaction-GIF endpoint (public, no API key) — used by /hug, /kiss, etc.
 GIF_API_BASE = "https://nekos.best/api/v2"
 
-# ── NUEVOS EMOJIS PERSONALIZADOS (SIN UNICODE, EXCEPTO 📱) ────
-# Formato Normal: <:Nombre:ID>
-# Formato Animado: <a:Nombre:ID>
+# Keyword GIF search endpoint — used by /gif <query>
+# NOTE: move KLIPY_API_KEY to an environment variable in production
+# instead of leaving it hardcoded in the source.
+KLIPY_SEARCH_URL = "https://api.klipy.com/v1/search"
+KLIPY_API_KEY = os.environ.get("KLIPY_API_KEY", "XApPsk3XcfRBDT3wR6w8tlTekq0yOEGGcGXtGxeHS1y67owatVyhhUhiIosrHfxJ")
+
+# ── CUSTOM EMOJIS (NO UNICODE, EXCEPT 📱) ──────────────────────
+# Normal format: <:Name:ID>
+# Animated format: <a:Name:ID>
 
 EMOJI_GREEN_DOT = "<a:fmd_green_dot:1526742445323190272>"
 EMOJI_LOADER    = "<a:fmd_loader:1526741970226253834>"
@@ -59,16 +65,16 @@ EMOJI_KEY       = "<:fmd_key:1526743159038803978>"
 EMOJI_CLOCK     = "<a:fmd_clock:1525380296852377711>"
 EMOJI_SUCCESS   = "<:fmd_success:1526742163050991616>"
 
-# Emojis para Botones
+# Button emojis
 EMOJI_COPY_OBJ    = discord.PartialEmoji(name="fmd_copy", id=1526743644894138479)
 EMOJI_DISCORD_OBJ = discord.PartialEmoji(name="fmd_discord", id=1526743527642501273)
 EMOJI_INVITE_OBJ  = discord.PartialEmoji(name="fmd_invite", id=1526743390488756236)
 EMOJI_PC_OBJ      = discord.PartialEmoji(name="fmd_pc", id=1526858555544572035)
 
-# ── COLORES ──────────────────────────────────────────────────────
+# ── COLORS ───────────────────────────────────────────────────────
 C_GREEN  = 0x00FF66  # Neon Green Premium
-C_WARN   = 0xFFA500  # Naranja
-C_ERROR  = 0xED4245  # Rojo
+C_WARN   = 0xFFA500  # Orange
+C_ERROR  = 0xED4245  # Red
 
 # ── HELPERS ──────────────────────────────────────────────────────
 BOT_START_TIME = datetime.now(timezone.utc)
@@ -91,14 +97,14 @@ def _get_platform(interaction: discord.Interaction) -> str:
     try:
         member = interaction.guild.get_member(interaction.user.id) if interaction.guild else None
         if member and member.is_on_mobile():
-            return "📱"  # Excepción explícita permitida para móvil
+            return "📱"  # Explicitly allowed exception for mobile
         else:
             return "PC"
     except Exception:
         return "PC"
 
 def _e(title: str, description: str = "", color: int = C_GREEN) -> discord.Embed:
-    """Embed base reutilizable para todos los comandos nuevos."""
+    """Reusable base embed for every new command."""
     e = discord.Embed(
         title=f"{EMOJI_GREEN_DOT} {title}",
         description=description,
@@ -115,7 +121,7 @@ async def _send_error(interaction: discord.Interaction, description: str, epheme
     else:
         await interaction.response.send_message(embed=e, ephemeral=ephemeral)
 
-# ── MOTOR DE BYPASS (Robusto) ──────────────────────────────────
+# ── BYPASS ENGINE (Robust) ──────────────────────────────────────
 _http_session = requests.Session()
 _http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
 
@@ -148,7 +154,7 @@ def _extract_bypass_result(data):
     return None
 
 def bypass_url_vps(url: str):
-    last_error = "Error desconocido"
+    last_error = "Unknown error"
     for attempt in range(1, VPS_BYPASS_MAX_RETRIES + 1):
         try:
             full_url = VPS_BYPASS_ENDPOINT + quote(url, safe="")
@@ -167,7 +173,7 @@ def bypass_url_vps(url: str):
                 txt = resp.text.strip()
                 if txt.startswith("http"):
                     return txt, None
-                last_error = "Respuesta inválida de la API"
+                last_error = "Invalid API response"
                 if attempt < VPS_BYPASS_MAX_RETRIES:
                     time.sleep(VPS_BYPASS_RETRY_DELAY)
                     continue
@@ -188,16 +194,16 @@ def bypass_url_vps(url: str):
                 err_msg = None
                 if isinstance(data, dict):
                     err_msg = data.get("message") or data.get("error")
-                last_error = str(err_msg or "La API reportó un error.")
+                last_error = str(err_msg or "The API reported an error.")
                 if attempt < VPS_BYPASS_MAX_RETRIES:
                     time.sleep(VPS_BYPASS_RETRY_DELAY)
                     continue
                 return None, last_error
 
-            return None, "No se encontró resultado en la API."
+            return None, "No result found in the API."
 
         except requests.exceptions.Timeout:
-            last_error = f"Tiempo de espera agotado ({VPS_BYPASS_TIMEOUT}s)"
+            last_error = f"Request timed out ({VPS_BYPASS_TIMEOUT}s)"
             if attempt < VPS_BYPASS_MAX_RETRIES:
                 time.sleep(VPS_BYPASS_RETRY_DELAY)
         except Exception as e:
@@ -207,7 +213,7 @@ def bypass_url_vps(url: str):
 
     return None, last_error
 
-# ── ARCHIVOS JSON (Auto-Bypass: guarda un set de IDs) ───────────
+# ── JSON FILES (Auto-Bypass: stores a set of IDs) ────────────────
 def load_json(path, default):
     if os.path.exists(path):
         try:
@@ -226,7 +232,7 @@ def save_json(path, data):
 
 autobypass_channels = load_json(AUTOBYPASS_CHANNELS_FILE, set())
 
-# ── ARCHIVOS JSON (Datos generales: economía, niveles, etc) ────
+# ── JSON FILES (General data: economy, levels, etc.) ─────────────
 DATA_DIR = "data"
 os.makedirs(DATA_DIR, exist_ok=True)
 
@@ -280,13 +286,13 @@ def get_config(gid) -> dict:
 def xp_needed(level: int) -> int:
     return 5 * (level ** 2) + 50 * level + 100
 
-# ── EMBEDS (Diseño Premium Verde) ──────────────────────────────
+# ── EMBEDS (Premium Green Design) ────────────────────────────────
 def embed_loading() -> discord.Embed:
     e = discord.Embed(color=C_WARN, timestamp=datetime.now(timezone.utc))
     e.set_author(name="FMD BOT • BYPASS")
     e.title = f"{EMOJI_LOADER} Generating Bypass..."
     e.description = "Processing your link...\nPlease wait..."
-    e.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526741970226253834.gif") # Loader
+    e.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526741970226253834.gif")  # Loader
     e.set_footer(text=_footer())
     return e
 
@@ -295,7 +301,7 @@ def embed_success(result: str, elapsed: float, platform: str) -> discord.Embed:
     e.set_author(name="FMD BOT • BYPASS")
     e.title = f"{EMOJI_GREEN_DOT} Bypass Completed"
     e.description = "Generated successfully.\n\n🕒 Auto delete in 120s"
-    e.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526742765311098980.gif") # Corona obligatoria
+    e.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526742765311098980.gif")  # Required crown
 
     e.add_field(name=f"{EMOJI_KEY} Result", value=f"```txt\n{result[:900]}\n```", inline=False)
     e.add_field(name=f"{EMOJI_CLOCK} Duration", value=f"`{elapsed:.2f}s`", inline=True)
@@ -319,7 +325,7 @@ def embed_fail(error: str, elapsed: float, platform: str) -> discord.Embed:
     e.set_footer(text=_footer())
     return e
 
-# ── VIEW (SOLO 3 BOTONES) ──────────────────────────────────────
+# ── VIEW (ONLY 3 BUTTONS) ────────────────────────────────────────
 class FmdBypassView(View):
     def __init__(self, result: str):
         super().__init__(timeout=None)
@@ -335,7 +341,7 @@ class FmdBypassView(View):
             ephemeral=True
         )
 
-# ── CUENTA REGRESIVA EN VIVO Y AUTO ELIMINACIÓN ────────────────
+# ── LIVE COUNTDOWN AND AUTO-DELETE ───────────────────────────────
 async def start_countdown(message: discord.Message, base_embed: discord.Embed, view: View, seconds: int = 120):
     clock_emoji = EMOJI_CLOCK
     while seconds > 0:
@@ -363,7 +369,7 @@ async def start_countdown(message: discord.Message, base_embed: discord.Embed, v
     except Exception:
         pass
 
-# ── BOT CLIENT ──────────────────────────────────────────────────
+# ── BOT CLIENT ────────────────────────────────────────────────────
 class FmdBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -374,13 +380,13 @@ class FmdBot(discord.Client):
 
     async def setup_hook(self):
         await self.tree.sync()
-        logger.info("✅ Comandos globales sincronizados.")
+        logger.info("✅ Global commands synced.")
 
     async def on_ready(self):
         logger.info("=========================================")
         logger.info(f"✅ {self.user.name} Online!")
-        logger.info(f"📡 Servidores: {len(self.guilds)}")
-        logger.info(f"⚙️ Comandos registrados: {len(self.tree.get_commands())}")
+        logger.info(f"📡 Servers: {len(self.guilds)}")
+        logger.info(f"⚙️ Registered commands: {len(self.tree.get_commands())}")
         logger.info("=========================================")
         await self.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/bypass"))
 
@@ -388,7 +394,7 @@ class FmdBot(discord.Client):
         if message.author.bot or not message.guild:
             return
 
-        # XP por mensaje
+        # XP per message
         lvl = get_level(message.guild.id, message.author.id)
         lvl["xp"] += random.randint(5, 15)
         needed = xp_needed(lvl["level"])
@@ -396,7 +402,7 @@ class FmdBot(discord.Client):
             lvl["xp"] -= needed
             lvl["level"] += 1
             try:
-                await message.channel.send(embed=_e("¡Subiste de Nivel!", f"{message.author.mention} ahora es nivel **{lvl['level']}**"))
+                await message.channel.send(embed=_e("Level Up!", f"{message.author.mention} is now level **{lvl['level']}**"))
             except Exception:
                 pass
         save_data("levels", levels_data)
@@ -442,14 +448,14 @@ class FmdBot(discord.Client):
 bot = FmdBot()
 
 # ══════════════════════════════════════════════════════════════
-#  SLASH COMMANDS — SISTEMA DE BYPASS (NO TOCAR)
+#  SLASH COMMANDS — BYPASS SYSTEM (DO NOT TOUCH)
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="bypass", description="🔓 Bypass un enlace y obtén el destino real")
-@app_commands.describe(url="El enlace a bypassear")
+@bot.tree.command(name="bypass", description="🔓 Bypass a link and get the real destination")
+@app_commands.describe(url="The link to bypass")
 async def cmd_bypass(interaction: discord.Interaction, url: str):
     if not _is_valid_url(url):
-        e = discord.Embed(description="⚠️ URL inválida. Asegúrate de incluir `http://` o `https://`.", color=C_WARN)
+        e = discord.Embed(description="⚠️ Invalid URL. Make sure to include `http://` or `https://`.", color=C_WARN)
         e.set_footer(text=_footer())
         return await interaction.response.send_message(embed=e, ephemeral=True)
 
@@ -472,20 +478,20 @@ async def cmd_bypass(interaction: discord.Interaction, url: str):
             msg = await interaction.edit_original_response(embed=embed)
             asyncio.create_task(start_countdown(msg, embed, View()))
     except Exception as e:
-        logger.error(f"Error al editar respuesta: {e}")
+        logger.error(f"Error editing response: {e}")
 
-@bot.tree.command(name="setautobypass", description="⚙️ [Admin] Activar/desactivar auto-bypass en este canal")
+@bot.tree.command(name="setautobypass", description="⚙️ [Admin] Enable/disable auto-bypass in this channel")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_setautobypass(interaction: discord.Interaction):
     cid = interaction.channel_id
     if cid in autobypass_channels:
         autobypass_channels.discard(cid)
         save_json(AUTOBYPASS_CHANNELS_FILE, autobypass_channels)
-        e = discord.Embed(title="Auto-Bypass DESACTIVADO", description=f"{interaction.channel.mention} ya no hará bypass automático.", color=C_ERROR)
+        e = discord.Embed(title="Auto-Bypass DISABLED", description=f"{interaction.channel.mention} will no longer auto-bypass links.", color=C_ERROR)
     else:
         autobypass_channels.add(cid)
         save_json(AUTOBYPASS_CHANNELS_FILE, autobypass_channels)
-        e = discord.Embed(title="Auto-Bypass ACTIVADO", description=f"Cada enlace en {interaction.channel.mention} será bypasseado automáticamente.", color=C_GREEN)
+        e = discord.Embed(title="Auto-Bypass ENABLED", description=f"Every link in {interaction.channel.mention} will be automatically bypassed.", color=C_GREEN)
     e.set_author(name="FMD BOT • BYPASS", icon_url="")
     e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e, ephemeral=True)
@@ -493,16 +499,16 @@ async def cmd_setautobypass(interaction: discord.Interaction):
 @cmd_setautobypass.error
 async def _ab_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
     if isinstance(error, app_commands.MissingPermissions):
-        await interaction.response.send_message("🚫 Necesitas permiso de Administrador!", ephemeral=True)
+        await interaction.response.send_message("🚫 You need Administrator permission!", ephemeral=True)
 
-@bot.tree.command(name="ping", description="🏓 Ver la latencia del bot")
+@bot.tree.command(name="ping", description="🏓 Check the bot's latency")
 async def cmd_ping(interaction: discord.Interaction):
     ms = round(bot.latency * 1000)
     e = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
     e.set_author(name="FMD BOT • BYPASS", icon_url="")
-    e.add_field(name="Latencia", value=f"`{ms}ms`", inline=True)
+    e.add_field(name="Latency", value=f"`{ms}ms`", inline=True)
     e.add_field(name="Uptime", value=f"`{_uptime()}`", inline=True)
-    e.add_field(name="Servidores", value=f"`{len(bot.guilds)}`", inline=True)
+    e.add_field(name="Servers", value=f"`{len(bot.guilds)}`", inline=True)
     e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e)
 
@@ -511,296 +517,296 @@ def _perm_error_handler(cmd):
     @cmd.error
     async def _handler(interaction: discord.Interaction, error: app_commands.AppCommandError):
         if isinstance(error, app_commands.MissingPermissions):
-            await interaction.response.send_message("🚫 Necesitas permiso de Administrador!", ephemeral=True)
+            await interaction.response.send_message("🚫 You need Administrator permission!", ephemeral=True)
         else:
             await _send_error(interaction, f"```\n{str(error)[:200]}\n```")
     return _handler
 
 
 # ══════════════════════════════════════════════════════════════
-#  MODERACIÓN
+#  MODERATION
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="kick", description="👢 [Admin] Expulsar a un miembro del servidor")
-@app_commands.describe(usuario="Usuario a expulsar", razon="Razón de la expulsión")
+@bot.tree.command(name="kick", description="👢 [Admin] Kick a member from the server")
+@app_commands.describe(user="User to kick", reason="Reason for the kick")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_kick(interaction: discord.Interaction, usuario: discord.Member, razon: str = "Sin razón especificada"):
-    if usuario.id == interaction.user.id:
-        return await _send_error(interaction, "No puedes expulsarte a ti mismo.")
+async def cmd_kick(interaction: discord.Interaction, user: discord.Member, reason: str = "No reason provided"):
+    if user.id == interaction.user.id:
+        return await _send_error(interaction, "You can't kick yourself.")
     try:
-        await usuario.kick(reason=razon)
-        e = _e("Miembro Expulsado")
-        e.add_field(name="Usuario", value=f"`{usuario}`", inline=True)
-        e.add_field(name="Moderador", value=f"`{interaction.user}`", inline=True)
-        e.add_field(name="Razón", value=f"`{razon}`", inline=False)
+        await user.kick(reason=reason)
+        e = _e("Member Kicked")
+        e.add_field(name="User", value=f"`{user}`", inline=True)
+        e.add_field(name="Moderator", value=f"`{interaction.user}`", inline=True)
+        e.add_field(name="Reason", value=f"`{reason}`", inline=False)
         await interaction.response.send_message(embed=e)
     except discord.Forbidden:
-        await _send_error(interaction, "No tengo permisos suficientes para expulsar a este usuario.")
+        await _send_error(interaction, "I don't have enough permissions to kick this user.")
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_kick)
 
-@bot.tree.command(name="ban", description="🔨 [Admin] Banear a un miembro del servidor")
-@app_commands.describe(usuario="Usuario a banear", razon="Razón del baneo")
+@bot.tree.command(name="ban", description="🔨 [Admin] Ban a member from the server")
+@app_commands.describe(user="User to ban", reason="Reason for the ban")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_ban(interaction: discord.Interaction, usuario: discord.Member, razon: str = "Sin razón especificada"):
-    if usuario.id == interaction.user.id:
-        return await _send_error(interaction, "No puedes banearte a ti mismo.")
+async def cmd_ban(interaction: discord.Interaction, user: discord.Member, reason: str = "No reason provided"):
+    if user.id == interaction.user.id:
+        return await _send_error(interaction, "You can't ban yourself.")
     try:
-        await usuario.ban(reason=razon)
-        e = _e("Miembro Baneado")
-        e.add_field(name="Usuario", value=f"`{usuario}`", inline=True)
-        e.add_field(name="Moderador", value=f"`{interaction.user}`", inline=True)
-        e.add_field(name="Razón", value=f"`{razon}`", inline=False)
+        await user.ban(reason=reason)
+        e = _e("Member Banned")
+        e.add_field(name="User", value=f"`{user}`", inline=True)
+        e.add_field(name="Moderator", value=f"`{interaction.user}`", inline=True)
+        e.add_field(name="Reason", value=f"`{reason}`", inline=False)
         await interaction.response.send_message(embed=e)
     except discord.Forbidden:
-        await _send_error(interaction, "No tengo permisos suficientes para banear a este usuario.")
+        await _send_error(interaction, "I don't have enough permissions to ban this user.")
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_ban)
 
-@bot.tree.command(name="unban", description="🔓 [Admin] Desbanear a un usuario por su ID")
-@app_commands.describe(user_id="ID del usuario a desbanear")
+@bot.tree.command(name="unban", description="🔓 [Admin] Unban a user by their ID")
+@app_commands.describe(user_id="ID of the user to unban")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_unban(interaction: discord.Interaction, user_id: str):
     try:
         user = await bot.fetch_user(int(user_id))
         await interaction.guild.unban(user)
-        await interaction.response.send_message(embed=_e("Usuario Desbaneado", f"`{user}` fue desbaneado."))
+        await interaction.response.send_message(embed=_e("User Unbanned", f"`{user}` was unbanned."))
     except ValueError:
-        await _send_error(interaction, "El ID proporcionado no es válido.")
+        await _send_error(interaction, "The provided ID is not valid.")
     except discord.NotFound:
-        await _send_error(interaction, "Ese usuario no está baneado.")
+        await _send_error(interaction, "That user is not banned.")
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_unban)
 
-@bot.tree.command(name="softban", description="🔨 [Admin] Banea y desbanea para limpiar mensajes del usuario")
-@app_commands.describe(usuario="Usuario a softbanear", razon="Razón")
+@bot.tree.command(name="softban", description="🔨 [Admin] Ban and unban to clean up a user's messages")
+@app_commands.describe(user="User to softban", reason="Reason")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_softban(interaction: discord.Interaction, usuario: discord.Member, razon: str = "Sin razón especificada"):
+async def cmd_softban(interaction: discord.Interaction, user: discord.Member, reason: str = "No reason provided"):
     try:
-        await usuario.ban(reason=razon, delete_message_days=1)
-        await interaction.guild.unban(usuario)
-        await interaction.response.send_message(embed=_e("Softban Aplicado", f"`{usuario}` fue softbaneado (sus mensajes recientes fueron eliminados)."))
+        await user.ban(reason=reason, delete_message_days=1)
+        await interaction.guild.unban(user)
+        await interaction.response.send_message(embed=_e("Softban Applied", f"`{user}` was softbanned (their recent messages were deleted)."))
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_softban)
 
-@bot.tree.command(name="mute", description="🔇 [Admin] Silenciar a un usuario (timeout)")
-@app_commands.describe(usuario="Usuario a silenciar", minutos="Duración en minutos")
+@bot.tree.command(name="mute", description="🔇 [Admin] Mute a user (timeout)")
+@app_commands.describe(user="User to mute", minutes="Duration in minutes")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_mute(interaction: discord.Interaction, usuario: discord.Member, minutos: int = 10):
-    if minutos < 1 or minutos > 40320:
-        return await _send_error(interaction, "La duración debe estar entre `1` y `40320` minutos (28 días).")
+async def cmd_mute(interaction: discord.Interaction, user: discord.Member, minutes: int = 10):
+    if minutes < 1 or minutes > 40320:
+        return await _send_error(interaction, "Duration must be between `1` and `40320` minutes (28 days).")
     try:
-        await usuario.timeout(discord.utils.utcnow() + timedelta(minutes=minutos), reason=f"Mute por {interaction.user}")
-        await interaction.response.send_message(embed=_e("Usuario Silenciado", f"{usuario.mention} fue silenciado por `{minutos}` min."))
+        await user.timeout(discord.utils.utcnow() + timedelta(minutes=minutes), reason=f"Muted by {interaction.user}")
+        await interaction.response.send_message(embed=_e("User Muted", f"{user.mention} was muted for `{minutes}` min."))
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_mute)
 
-@bot.tree.command(name="unmute", description="🔊 [Admin] Quitar el silencio a un usuario")
-@app_commands.describe(usuario="Usuario a des-silenciar")
+@bot.tree.command(name="unmute", description="🔊 [Admin] Remove a user's mute")
+@app_commands.describe(user="User to unmute")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_unmute(interaction: discord.Interaction, usuario: discord.Member):
+async def cmd_unmute(interaction: discord.Interaction, user: discord.Member):
     try:
-        await usuario.timeout(None, reason=f"Unmute por {interaction.user}")
-        await interaction.response.send_message(embed=_e("Silencio Removido", f"{usuario.mention} ya no está silenciado."))
+        await user.timeout(None, reason=f"Unmuted by {interaction.user}")
+        await interaction.response.send_message(embed=_e("Mute Removed", f"{user.mention} is no longer muted."))
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_unmute)
 
-@bot.tree.command(name="warn", description="⚠️ [Admin] Advertir a un usuario")
-@app_commands.describe(usuario="Usuario a advertir", razon="Razón de la advertencia")
+@bot.tree.command(name="warn", description="⚠️ [Admin] Warn a user")
+@app_commands.describe(user="User to warn", reason="Reason for the warning")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_warn(interaction: discord.Interaction, usuario: discord.Member, razon: str = "Sin razón especificada"):
-    gid, uid = str(interaction.guild_id), str(usuario.id)
+async def cmd_warn(interaction: discord.Interaction, user: discord.Member, reason: str = "No reason provided"):
+    gid, uid = str(interaction.guild_id), str(user.id)
     warnings_data.setdefault(gid, {}).setdefault(uid, [])
-    warnings_data[gid][uid].append({"mod": str(interaction.user.id), "reason": razon, "ts": int(time.time())})
+    warnings_data[gid][uid].append({"mod": str(interaction.user.id), "reason": reason, "ts": int(time.time())})
     save_data("warnings", warnings_data)
-    await interaction.response.send_message(embed=_e("Advertencia Añadida", f"{usuario.mention} fue advertido.\nTotal: `{len(warnings_data[gid][uid])}`"))
+    await interaction.response.send_message(embed=_e("Warning Added", f"{user.mention} was warned.\nTotal: `{len(warnings_data[gid][uid])}`"))
 _perm_error_handler(cmd_warn)
 
-@bot.tree.command(name="unwarn", description="✅ [Admin] Quitar una advertencia a un usuario")
-@app_commands.describe(usuario="Usuario", indice="Número de advertencia a remover (empieza en 1)")
+@bot.tree.command(name="unwarn", description="✅ [Admin] Remove a warning from a user")
+@app_commands.describe(user="User", index="Warning number to remove (starts at 1)")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_unwarn(interaction: discord.Interaction, usuario: discord.Member, indice: int = 1):
-    gid, uid = str(interaction.guild_id), str(usuario.id)
+async def cmd_unwarn(interaction: discord.Interaction, user: discord.Member, index: int = 1):
+    gid, uid = str(interaction.guild_id), str(user.id)
     warns = warnings_data.get(gid, {}).get(uid, [])
-    if not warns or len(warns) < indice or indice < 1:
-        return await _send_error(interaction, "No existe una advertencia en ese índice.")
-    warns.pop(indice - 1)
+    if not warns or len(warns) < index or index < 1:
+        return await _send_error(interaction, "There's no warning at that index.")
+    warns.pop(index - 1)
     save_data("warnings", warnings_data)
-    await interaction.response.send_message(embed=_e("Advertencia Removida", f"Advertencia #{indice} removida de {usuario.mention}."))
+    await interaction.response.send_message(embed=_e("Warning Removed", f"Warning #{index} removed from {user.mention}."))
 _perm_error_handler(cmd_unwarn)
 
-@bot.tree.command(name="warnings", description="📋 Ver las advertencias de un usuario")
-@app_commands.describe(usuario="Usuario a consultar")
-async def cmd_warnings(interaction: discord.Interaction, usuario: discord.Member):
-    gid, uid = str(interaction.guild_id), str(usuario.id)
+@bot.tree.command(name="warnings", description="📋 View a user's warnings")
+@app_commands.describe(user="User to check")
+async def cmd_warnings(interaction: discord.Interaction, user: discord.Member):
+    gid, uid = str(interaction.guild_id), str(user.id)
     warns = warnings_data.get(gid, {}).get(uid, [])
     if not warns:
-        return await interaction.response.send_message(embed=_e("Advertencias", f"{usuario.mention} no tiene advertencias."))
+        return await interaction.response.send_message(embed=_e("Warnings", f"{user.mention} has no warnings."))
     desc = "\n".join(f"`{i+1}.` {w['reason']} — <t:{w['ts']}:R>" for i, w in enumerate(warns))
-    await interaction.response.send_message(embed=_e(f"Advertencias de {usuario.display_name}", desc))
+    await interaction.response.send_message(embed=_e(f"Warnings for {user.display_name}", desc))
 
-@bot.tree.command(name="clear", description="🧹 [Admin] Eliminar mensajes masivamente")
-@app_commands.describe(cantidad="Cantidad de mensajes a eliminar (1-100)")
+@bot.tree.command(name="clear", description="🧹 [Admin] Bulk delete messages")
+@app_commands.describe(amount="Number of messages to delete (1-100)")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_clear(interaction: discord.Interaction, cantidad: int):
-    if cantidad < 1 or cantidad > 100:
-        return await interaction.response.send_message(embed=_e("Cantidad Inválida", "La cantidad debe estar entre `1` y `100`.", C_WARN), ephemeral=True)
+async def cmd_clear(interaction: discord.Interaction, amount: int):
+    if amount < 1 or amount > 100:
+        return await interaction.response.send_message(embed=_e("Invalid Amount", "The amount must be between `1` and `100`.", C_WARN), ephemeral=True)
     await interaction.response.defer(ephemeral=True)
     try:
-        deleted = await interaction.channel.purge(limit=cantidad)
-        await interaction.followup.send(embed=_e("Mensajes Eliminados", f"Se eliminaron `{len(deleted)}` mensajes de {interaction.channel.mention}."), ephemeral=True)
+        deleted = await interaction.channel.purge(limit=amount)
+        await interaction.followup.send(embed=_e("Messages Deleted", f"`{len(deleted)}` messages were deleted from {interaction.channel.mention}."), ephemeral=True)
     except discord.Forbidden:
-        await interaction.followup.send(embed=_e("Error de Permisos", "No tengo permisos suficientes para eliminar mensajes.", C_ERROR), ephemeral=True)
+        await interaction.followup.send(embed=_e("Permission Error", "I don't have enough permissions to delete messages.", C_ERROR), ephemeral=True)
     except Exception as ex:
         await interaction.followup.send(embed=_e("Error", f"```\n{str(ex)[:200]}\n```", C_ERROR), ephemeral=True)
 _perm_error_handler(cmd_clear)
 
-@bot.tree.command(name="purgeuser", description="🧹 [Admin] Eliminar mensajes de un usuario específico")
-@app_commands.describe(usuario="Usuario cuyos mensajes se eliminarán", cantidad="Cantidad de mensajes a revisar (máx 200)")
+@bot.tree.command(name="purgeuser", description="🧹 [Admin] Delete messages from a specific user")
+@app_commands.describe(user="User whose messages will be deleted", amount="Number of messages to scan (max 200)")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_purgeuser(interaction: discord.Interaction, usuario: discord.Member, cantidad: int = 50):
-    cantidad = max(1, min(cantidad, 200))
+async def cmd_purgeuser(interaction: discord.Interaction, user: discord.Member, amount: int = 50):
+    amount = max(1, min(amount, 200))
     await interaction.response.defer(ephemeral=True)
     try:
-        deleted = await interaction.channel.purge(limit=cantidad, check=lambda m: m.author.id == usuario.id)
-        await interaction.followup.send(embed=_e("Mensajes Eliminados", f"Se eliminaron `{len(deleted)}` mensajes de {usuario.mention}."), ephemeral=True)
+        deleted = await interaction.channel.purge(limit=amount, check=lambda m: m.author.id == user.id)
+        await interaction.followup.send(embed=_e("Messages Deleted", f"`{len(deleted)}` messages were deleted from {user.mention}."), ephemeral=True)
     except Exception as ex:
         await interaction.followup.send(embed=_e("Error", f"```\n{str(ex)[:200]}\n```", C_ERROR), ephemeral=True)
 _perm_error_handler(cmd_purgeuser)
 
-@bot.tree.command(name="lock", description="🔒 [Admin] Bloquear el canal actual")
+@bot.tree.command(name="lock", description="🔒 [Admin] Lock the current channel")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_lock(interaction: discord.Interaction):
     await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=False)
-    await interaction.response.send_message(embed=_e("Canal Bloqueado", f"{interaction.channel.mention} fue bloqueado."))
+    await interaction.response.send_message(embed=_e("Channel Locked", f"{interaction.channel.mention} was locked."))
 _perm_error_handler(cmd_lock)
 
-@bot.tree.command(name="unlock", description="🔓 [Admin] Desbloquear el canal actual")
+@bot.tree.command(name="unlock", description="🔓 [Admin] Unlock the current channel")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_unlock(interaction: discord.Interaction):
     await interaction.channel.set_permissions(interaction.guild.default_role, send_messages=None)
-    await interaction.response.send_message(embed=_e("Canal Desbloqueado", f"{interaction.channel.mention} fue desbloqueado."))
+    await interaction.response.send_message(embed=_e("Channel Unlocked", f"{interaction.channel.mention} was unlocked."))
 _perm_error_handler(cmd_unlock)
 
-@bot.tree.command(name="slowmode", description="🐌 [Admin] Configurar el modo lento del canal")
-@app_commands.describe(segundos="Segundos entre mensajes (0 para desactivar, máx 21600)")
+@bot.tree.command(name="slowmode", description="🐌 [Admin] Set the channel's slowmode")
+@app_commands.describe(seconds="Seconds between messages (0 to disable, max 21600)")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_slowmode(interaction: discord.Interaction, segundos: int):
-    segundos = max(0, min(segundos, 21600))
-    await interaction.channel.edit(slowmode_delay=segundos)
-    if segundos == 0:
-        await interaction.response.send_message(embed=_e("Modo Lento Desactivado", f"{interaction.channel.mention} ya no tiene modo lento."))
+async def cmd_slowmode(interaction: discord.Interaction, seconds: int):
+    seconds = max(0, min(seconds, 21600))
+    await interaction.channel.edit(slowmode_delay=seconds)
+    if seconds == 0:
+        await interaction.response.send_message(embed=_e("Slowmode Disabled", f"{interaction.channel.mention} no longer has slowmode."))
     else:
-        await interaction.response.send_message(embed=_e("Modo Lento Activado", f"{interaction.channel.mention} ahora tiene `{segundos}s` de espera entre mensajes."))
+        await interaction.response.send_message(embed=_e("Slowmode Enabled", f"{interaction.channel.mention} now has a `{seconds}s` delay between messages."))
 _perm_error_handler(cmd_slowmode)
 
-@bot.tree.command(name="nickname", description="✏️ [Admin] Cambiar el apodo de un usuario")
-@app_commands.describe(usuario="Usuario", apodo="Nuevo apodo (vacío para quitarlo)")
+@bot.tree.command(name="nickname", description="✏️ [Admin] Change a user's nickname")
+@app_commands.describe(user="User", nickname="New nickname (leave empty to remove it)")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_nickname(interaction: discord.Interaction, usuario: discord.Member, apodo: str = None):
+async def cmd_nickname(interaction: discord.Interaction, user: discord.Member, nickname: str = None):
     try:
-        await usuario.edit(nick=apodo)
-        desc = f"El apodo de {usuario.mention} fue cambiado a `{apodo}`." if apodo else f"El apodo de {usuario.mention} fue removido."
-        await interaction.response.send_message(embed=_e("Apodo Actualizado", desc))
+        await user.edit(nick=nickname)
+        desc = f"{user.mention}'s nickname was changed to `{nickname}`." if nickname else f"{user.mention}'s nickname was removed."
+        await interaction.response.send_message(embed=_e("Nickname Updated", desc))
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_nickname)
 
 
 # ══════════════════════════════════════════════════════════════
-#  DIVERSIÓN
+#  FUN
 # ══════════════════════════════════════════════════════════════
 
 _8BALL_RESPONSES = [
-    "Sí, definitivamente.", "Es cierto.", "Sin duda alguna.", "Sí, puedes confiar en ello.",
-    "Muy probable.", "Las señales apuntan a que sí.", "Respuesta dudosa, intenta de nuevo.",
-    "Pregunta de nuevo más tarde.", "Mejor no decirte ahora.", "No puedo predecirlo ahora.",
-    "Concéntrate y pregunta de nuevo.", "No cuentes con ello.", "Mi respuesta es no.",
-    "Mis fuentes dicen que no.", "Muy dudoso.",
+    "Yes, definitely.", "It is certain.", "Without a doubt.", "Yes, you can rely on it.",
+    "Most likely.", "Signs point to yes.", "Reply hazy, try again.",
+    "Ask again later.", "Better not tell you now.", "Cannot predict now.",
+    "Concentrate and ask again.", "Don't count on it.", "My reply is no.",
+    "My sources say no.", "Very doubtful.",
 ]
 
-@bot.tree.command(name="8ball", description="🎱 Pregúntale algo a la bola mágica")
-@app_commands.describe(pregunta="Tu pregunta para la bola mágica")
-async def cmd_8ball(interaction: discord.Interaction, pregunta: str):
-    respuesta = random.choice(_8BALL_RESPONSES)
-    e = _e("Bola Mágica")
-    e.add_field(name="Pregunta", value=f"`{pregunta}`", inline=False)
-    e.add_field(name="Respuesta", value=f"`{respuesta}`", inline=False)
+@bot.tree.command(name="8ball", description="🎱 Ask the magic 8-ball a question")
+@app_commands.describe(question="Your question for the magic 8-ball")
+async def cmd_8ball(interaction: discord.Interaction, question: str):
+    answer = random.choice(_8BALL_RESPONSES)
+    e = _e("Magic 8-Ball")
+    e.add_field(name="Question", value=f"`{question}`", inline=False)
+    e.add_field(name="Answer", value=f"`{answer}`", inline=False)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="coinflip", description="🪙 Lanzar una moneda")
+@bot.tree.command(name="coinflip", description="🪙 Flip a coin")
 async def cmd_coinflip(interaction: discord.Interaction):
-    resultado = random.choice(["Cara", "Cruz"])
-    await interaction.response.send_message(embed=_e("Lanzamiento de Moneda", f"La moneda cayó en: `{resultado}`"))
+    result = random.choice(["Heads", "Tails"])
+    await interaction.response.send_message(embed=_e("Coin Flip", f"The coin landed on: `{result}`"))
 
-@bot.tree.command(name="dice", description="🎲 Lanzar un dado")
-@app_commands.describe(caras="Cantidad de caras del dado (default 6, máx 100)")
-async def cmd_dice(interaction: discord.Interaction, caras: int = 6):
-    if caras < 2 or caras > 100:
-        return await interaction.response.send_message(embed=_e("Valor Inválido", "El dado debe tener entre `2` y `100` caras.", C_WARN), ephemeral=True)
-    resultado = random.randint(1, caras)
-    await interaction.response.send_message(embed=_e("Lanzamiento de Dado", f"Dado de `{caras}` caras — Resultado: `{resultado}`"))
+@bot.tree.command(name="dice", description="🎲 Roll a die")
+@app_commands.describe(sides="Number of sides on the die (default 6, max 100)")
+async def cmd_dice(interaction: discord.Interaction, sides: int = 6):
+    if sides < 2 or sides > 100:
+        return await interaction.response.send_message(embed=_e("Invalid Value", "The die must have between `2` and `100` sides.", C_WARN), ephemeral=True)
+    result = random.randint(1, sides)
+    await interaction.response.send_message(embed=_e("Dice Roll", f"`{sides}`-sided die — Result: `{result}`"))
 
-@bot.tree.command(name="rps", description="✊ Piedra, papel o tijera contra el bot")
-@app_commands.describe(eleccion="Tu elección")
-@app_commands.choices(eleccion=[
-    app_commands.Choice(name="Piedra", value="piedra"),
-    app_commands.Choice(name="Papel", value="papel"),
-    app_commands.Choice(name="Tijera", value="tijera"),
+@bot.tree.command(name="rps", description="✊ Rock, paper or scissors against the bot")
+@app_commands.describe(choice="Your choice")
+@app_commands.choices(choice=[
+    app_commands.Choice(name="Rock", value="rock"),
+    app_commands.Choice(name="Paper", value="paper"),
+    app_commands.Choice(name="Scissors", value="scissors"),
 ])
-async def cmd_rps(interaction: discord.Interaction, eleccion: app_commands.Choice[str]):
-    opciones = ["piedra", "papel", "tijera"]
-    bot_choice = random.choice(opciones)
-    user_choice = eleccion.value
+async def cmd_rps(interaction: discord.Interaction, choice: app_commands.Choice[str]):
+    options = ["rock", "paper", "scissors"]
+    bot_choice = random.choice(options)
+    user_choice = choice.value
     if user_choice == bot_choice:
-        resultado, color = "Empate", C_WARN
-    elif (user_choice, bot_choice) in [("piedra", "tijera"), ("papel", "piedra"), ("tijera", "papel")]:
-        resultado, color = "¡Ganaste!", C_GREEN
+        result, color = "Tie", C_WARN
+    elif (user_choice, bot_choice) in [("rock", "scissors"), ("paper", "rock"), ("scissors", "paper")]:
+        result, color = "You won!", C_GREEN
     else:
-        resultado, color = "Perdiste.", C_ERROR
-    e = _e("Piedra, Papel o Tijera", color=color)
-    e.add_field(name="Tu elección", value=f"`{user_choice}`", inline=True)
+        result, color = "You lost.", C_ERROR
+    e = _e("Rock, Paper, Scissors", color=color)
+    e.add_field(name="Your choice", value=f"`{user_choice}`", inline=True)
     e.add_field(name="Bot", value=f"`{bot_choice}`", inline=True)
-    e.add_field(name="Resultado", value=f"`{resultado}`", inline=False)
+    e.add_field(name="Result", value=f"`{result}`", inline=False)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="ship", description="❤️ Calcula la compatibilidad entre dos personas")
-@app_commands.describe(usuario1="Primera persona", usuario2="Segunda persona")
-async def cmd_ship(interaction: discord.Interaction, usuario1: discord.Member, usuario2: discord.Member):
-    amor = random.randint(0, 100)
-    barra = "🟩" * (amor // 10) + "⬛" * (10 - amor // 10)
-    e = _e("Calculadora de Amor", f"{usuario1.mention} + {usuario2.mention}\n\n{barra}\n`{amor}%`")
+@bot.tree.command(name="ship", description="❤️ Calculate the compatibility between two people")
+@app_commands.describe(user1="First person", user2="Second person")
+async def cmd_ship(interaction: discord.Interaction, user1: discord.Member, user2: discord.Member):
+    love = random.randint(0, 100)
+    bar = "🟩" * (love // 10) + "⬛" * (10 - love // 10)
+    e = _e("Love Calculator", f"{user1.mention} + {user2.mention}\n\n{bar}\n`{love}%`")
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="choose", description="🎯 Elige una opción al azar entre varias")
-@app_commands.describe(opciones="Opciones separadas por coma")
-async def cmd_choose(interaction: discord.Interaction, opciones: str):
-    lista = [o.strip() for o in opciones.split(",") if o.strip()]
-    if len(lista) < 2:
-        return await _send_error(interaction, "Necesitas al menos 2 opciones separadas por coma.")
-    elegido = random.choice(lista)
-    await interaction.response.send_message(embed=_e("Elección Aleatoria", f"De entre: `{', '.join(lista)}`\n\nElegí: **{elegido}**"))
+@bot.tree.command(name="choose", description="🎯 Randomly choose one option among several")
+@app_commands.describe(options="Options separated by commas")
+async def cmd_choose(interaction: discord.Interaction, options: str):
+    options_list = [o.strip() for o in options.split(",") if o.strip()]
+    if len(options_list) < 2:
+        return await _send_error(interaction, "You need at least 2 options separated by commas.")
+    chosen = random.choice(options_list)
+    await interaction.response.send_message(embed=_e("Random Choice", f"Among: `{', '.join(options_list)}`\n\nI chose: **{chosen}**"))
 
-@bot.tree.command(name="reverse", description="🔁 Invierte un texto")
-@app_commands.describe(texto="Texto a invertir")
-async def cmd_reverse(interaction: discord.Interaction, texto: str):
-    await interaction.response.send_message(embed=_e("Texto Invertido", f"`{texto[::-1]}`"))
+@bot.tree.command(name="reverse", description="🔁 Reverse a text")
+@app_commands.describe(text="Text to reverse")
+async def cmd_reverse(interaction: discord.Interaction, text: str):
+    await interaction.response.send_message(embed=_e("Reversed Text", f"`{text[::-1]}`"))
 
-@bot.tree.command(name="say", description="📢 [Admin] Hacer que el bot repita un mensaje")
-@app_commands.describe(mensaje="Mensaje a enviar")
+@bot.tree.command(name="say", description="📢 [Admin] Make the bot repeat a message")
+@app_commands.describe(message="Message to send")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_say(interaction: discord.Interaction, mensaje: str):
-    await interaction.response.send_message(embed=_e("Mensaje Enviado", "Listo."), ephemeral=True)
-    await interaction.channel.send(mensaje)
+async def cmd_say(interaction: discord.Interaction, message: str):
+    await interaction.response.send_message(embed=_e("Message Sent", "Done."), ephemeral=True)
+    await interaction.channel.send(message)
 _perm_error_handler(cmd_say)
 
-@bot.tree.command(name="meme", description="😂 Meme aleatorio de Reddit")
+@bot.tree.command(name="meme", description="😂 Random meme from Reddit")
 async def cmd_meme(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
@@ -810,30 +816,30 @@ async def cmd_meme(interaction: discord.Interaction):
         e.set_footer(text=f"r/{r['subreddit']} • {_footer()}")
         await interaction.followup.send(embed=e)
     except Exception:
-        await interaction.followup.send(embed=_e("Error", "No se pudo obtener un meme en este momento.", C_ERROR))
+        await interaction.followup.send(embed=_e("Error", "Couldn't fetch a meme right now.", C_ERROR))
 
-@bot.tree.command(name="joke", description="😄 Chiste aleatorio")
+@bot.tree.command(name="joke", description="😄 Random joke")
 async def cmd_joke(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
-        r = requests.get("https://v2.jokeapi.dev/joke/Any?lang=es&safe-mode", timeout=10).json()
+        r = requests.get("https://v2.jokeapi.dev/joke/Any?safe-mode", timeout=10).json()
         txt = r["joke"] if r["type"] == "single" else f"{r['setup']}\n\n{r['delivery']}"
-        await interaction.followup.send(embed=_e("Chiste Aleatorio", txt))
+        await interaction.followup.send(embed=_e("Random Joke", txt))
     except Exception:
-        await interaction.followup.send(embed=_e("Error", "No se pudo obtener un chiste en este momento.", C_ERROR))
+        await interaction.followup.send(embed=_e("Error", "Couldn't fetch a joke right now.", C_ERROR))
 
-@bot.tree.command(name="fact", description="🧠 Dato curioso aleatorio")
+@bot.tree.command(name="fact", description="🧠 Random fun fact")
 async def cmd_fact(interaction: discord.Interaction):
     await interaction.response.defer()
     try:
         r = requests.get("https://uselessfacts.jsph.pl/api/v2/facts/random?language=en", timeout=10).json()
-        await interaction.followup.send(embed=_e("Dato Curioso", r.get("text", "N/A")))
+        await interaction.followup.send(embed=_e("Fun Fact", r.get("text", "N/A")))
     except Exception:
-        await interaction.followup.send(embed=_e("Error", "No se pudo obtener un dato curioso.", C_ERROR))
+        await interaction.followup.send(embed=_e("Error", "Couldn't fetch a fun fact.", C_ERROR))
 
 
-# ── COMANDOS DE GIF (nekos.best — público, sin API key) ─────────
-async def _send_gif_action(interaction: discord.Interaction, action: str, verbo: str, usuario: discord.Member = None):
+# ── REACTION-GIF COMMANDS (nekos.best — public, no API key) ─────
+async def _send_gif_action(interaction: discord.Interaction, action: str, title: str, verb: str, user: discord.Member = None):
     await interaction.response.defer()
     gif_url = None
     try:
@@ -841,264 +847,295 @@ async def _send_gif_action(interaction: discord.Interaction, action: str, verbo:
         gif_url = r["results"][0]["url"]
     except Exception:
         pass
-    desc = f"{interaction.user.mention} {verbo} a {usuario.mention}" if usuario else f"{interaction.user.mention} {verbo}"
-    e = _e(verbo.capitalize(), desc)
+    desc = f"{interaction.user.mention} {verb} {user.mention}" if user else f"{interaction.user.mention} {verb}"
+    e = _e(title, desc)
     if gif_url:
         e.set_image(url=gif_url)
     else:
-        e.description += "\n\n⚠️ No se pudo cargar el GIF en este momento."
+        e.description += "\n\n⚠️ Couldn't load the GIF right now."
     await interaction.followup.send(embed=e)
 
-@bot.tree.command(name="hug", description="🤗 Abraza a alguien")
-@app_commands.describe(usuario="A quién abrazar")
-async def cmd_hug(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "hug", "abraza", usuario)
+@bot.tree.command(name="hug", description="🤗 Hug someone")
+@app_commands.describe(user="Who to hug")
+async def cmd_hug(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "hug", "Hug", "hugs", user)
 
-@bot.tree.command(name="kiss", description="😘 Besa a alguien")
-@app_commands.describe(usuario="A quién besar")
-async def cmd_kiss(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "kiss", "besa", usuario)
+@bot.tree.command(name="kiss", description="😘 Kiss someone")
+@app_commands.describe(user="Who to kiss")
+async def cmd_kiss(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "kiss", "Kiss", "kisses", user)
 
-@bot.tree.command(name="pat", description="🖐️ Acaricia la cabeza de alguien")
-@app_commands.describe(usuario="A quién acariciar")
-async def cmd_pat(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "pat", "acaricia", usuario)
+@bot.tree.command(name="pat", description="🖐️ Pat someone's head")
+@app_commands.describe(user="Who to pat")
+async def cmd_pat(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "pat", "Pat", "pats", user)
 
-@bot.tree.command(name="slap", description="👋 Abofetea a alguien")
-@app_commands.describe(usuario="A quién abofetear")
-async def cmd_slap(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "slap", "abofetea", usuario)
+@bot.tree.command(name="slap", description="👋 Slap someone")
+@app_commands.describe(user="Who to slap")
+async def cmd_slap(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "slap", "Slap", "slaps", user)
 
-@bot.tree.command(name="cry", description="😢 Llora")
+@bot.tree.command(name="cry", description="😢 Cry")
 async def cmd_cry(interaction: discord.Interaction):
-    await _send_gif_action(interaction, "cry", "llora")
+    await _send_gif_action(interaction, "cry", "Cry", "cries")
 
-@bot.tree.command(name="dance", description="💃 Baila")
+@bot.tree.command(name="dance", description="💃 Dance")
 async def cmd_dance(interaction: discord.Interaction):
-    await _send_gif_action(interaction, "dance", "baila")
+    await _send_gif_action(interaction, "dance", "Dance", "dances")
 
-@bot.tree.command(name="poke", description="👉 Pica a alguien")
-@app_commands.describe(usuario="A quién picar")
-async def cmd_poke(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "poke", "pica", usuario)
+@bot.tree.command(name="poke", description="👉 Poke someone")
+@app_commands.describe(user="Who to poke")
+async def cmd_poke(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "poke", "Poke", "pokes", user)
 
-@bot.tree.command(name="tickle", description="🤣 Hace cosquillas a alguien")
-@app_commands.describe(usuario="A quién hacer cosquillas")
-async def cmd_tickle(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "tickle", "le hace cosquillas", usuario)
+@bot.tree.command(name="tickle", description="🤣 Tickle someone")
+@app_commands.describe(user="Who to tickle")
+async def cmd_tickle(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "tickle", "Tickle", "tickles", user)
 
-@bot.tree.command(name="blush", description="😳 Se sonroja")
+@bot.tree.command(name="blush", description="😳 Blush")
 async def cmd_blush(interaction: discord.Interaction):
-    await _send_gif_action(interaction, "blush", "se sonroja")
+    await _send_gif_action(interaction, "blush", "Blush", "blushes")
 
-@bot.tree.command(name="highfive", description="🙏 Choca los cinco con alguien")
-@app_commands.describe(usuario="Con quién chocar los cinco")
-async def cmd_highfive(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "highfive", "choca los cinco con", usuario)
+@bot.tree.command(name="highfive", description="🙏 High-five someone")
+@app_commands.describe(user="Who to high-five")
+async def cmd_highfive(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "highfive", "High Five", "high-fives", user)
 
-@bot.tree.command(name="bite", description="😬 Muerde a alguien")
-@app_commands.describe(usuario="A quién morder")
-async def cmd_bite(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "bite", "muerde a", usuario)
+@bot.tree.command(name="bite", description="😬 Bite someone")
+@app_commands.describe(user="Who to bite")
+async def cmd_bite(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "bite", "Bite", "bites", user)
 
-@bot.tree.command(name="cuddle", description="🥰 Acurruca a alguien")
-@app_commands.describe(usuario="A quién acurrucar")
-async def cmd_cuddle(interaction: discord.Interaction, usuario: discord.Member = None):
-    await _send_gif_action(interaction, "cuddle", "acurruca a", usuario)
+@bot.tree.command(name="cuddle", description="🥰 Cuddle someone")
+@app_commands.describe(user="Who to cuddle")
+async def cmd_cuddle(interaction: discord.Interaction, user: discord.Member = None):
+    await _send_gif_action(interaction, "cuddle", "Cuddle", "cuddles", user)
 
-@bot.tree.command(name="wave", description="👋 Saluda")
+@bot.tree.command(name="wave", description="👋 Wave")
 async def cmd_wave(interaction: discord.Interaction):
-    await _send_gif_action(interaction, "wave", "saluda")
+    await _send_gif_action(interaction, "wave", "Wave", "waves")
 
-@bot.tree.command(name="smile", description="😄 Sonríe")
+@bot.tree.command(name="smile", description="😄 Smile")
 async def cmd_smile(interaction: discord.Interaction):
-    await _send_gif_action(interaction, "smile", "sonríe")
+    await _send_gif_action(interaction, "smile", "Smile", "smiles")
+
+
+# ── KEYWORD GIF SEARCH (Klipy API) ───────────────────────────────
+async def fetch_klipy_gif(query: str):
+    """Search a GIF on Klipy by keyword. Returns the URL, or None on failure."""
+    try:
+        params = {"q": query, "key": KLIPY_API_KEY, "limit": 1}
+        timeout = aiohttp.ClientTimeout(total=10)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(KLIPY_SEARCH_URL, params=params) as resp:
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
+                results = data.get("results")
+                if not results:
+                    return None
+                return results[0]["media"]["gif"]["url"]
+    except Exception as ex:
+        logger.warning(f"fetch_klipy_gif: {ex}")
+        return None
+
+@bot.tree.command(name="gif", description="🎞️ Search for a GIF by keyword")
+@app_commands.describe(query="Keyword to search the GIF for (e.g. cat, laugh, anime)")
+async def cmd_gif(interaction: discord.Interaction, query: str):
+    await interaction.response.defer()
+    gif_url = await fetch_klipy_gif(query)
+    if not gif_url:
+        return await interaction.followup.send(embed=_e("No Results", f"I couldn't find any GIF for `{query}`.", C_WARN))
+    e = _e("GIF Result", f"Search: `{query}`")
+    e.set_image(url=gif_url)
+    await interaction.followup.send(embed=e)
 
 
 # ══════════════════════════════════════════════════════════════
-#  UTILIDAD
+#  UTILITY
 # ══════════════════════════════════════════════════════════════
 
 class AvatarView(View):
     def __init__(self, avatar_url: str):
         super().__init__(timeout=None)
-        self.add_item(Button(label="Abrir en navegador", url=avatar_url, style=discord.ButtonStyle.link))
+        self.add_item(Button(label="Open in browser", url=avatar_url, style=discord.ButtonStyle.link))
 
-@bot.tree.command(name="avatar", description="🖼️ Muestra el avatar de un usuario")
-@app_commands.describe(usuario="Usuario del que quieres ver el avatar")
-async def cmd_avatar(interaction: discord.Interaction, usuario: discord.Member = None):
-    usuario = usuario or interaction.user
-    avatar_url = usuario.display_avatar.url
-    e = _e(f"Avatar de {usuario.display_name}")
+@bot.tree.command(name="avatar", description="🖼️ Show a user's avatar")
+@app_commands.describe(user="User whose avatar you want to see")
+async def cmd_avatar(interaction: discord.Interaction, user: discord.Member = None):
+    user = user or interaction.user
+    avatar_url = user.display_avatar.url
+    e = _e(f"{user.display_name}'s Avatar")
     e.set_image(url=avatar_url)
     await interaction.response.send_message(embed=e, view=AvatarView(avatar_url))
 
-@bot.tree.command(name="banner", description="🎴 Muestra el banner de un usuario")
-@app_commands.describe(usuario="Usuario del que quieres ver el banner")
-async def cmd_banner(interaction: discord.Interaction, usuario: discord.Member = None):
-    usuario = usuario or interaction.user
+@bot.tree.command(name="banner", description="🎴 Show a user's banner")
+@app_commands.describe(user="User whose banner you want to see")
+async def cmd_banner(interaction: discord.Interaction, user: discord.Member = None):
+    user = user or interaction.user
     try:
-        full_user = await bot.fetch_user(usuario.id)
+        full_user = await bot.fetch_user(user.id)
         if not full_user.banner:
-            return await interaction.response.send_message(embed=_e("Sin Banner", f"{usuario.mention} no tiene un banner configurado.", C_WARN))
-        e = _e(f"Banner de {usuario.display_name}")
+            return await interaction.response.send_message(embed=_e("No Banner", f"{user.mention} doesn't have a banner set.", C_WARN))
+        e = _e(f"{user.display_name}'s Banner")
         e.set_image(url=full_user.banner.url)
         await interaction.response.send_message(embed=e)
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 
-@bot.tree.command(name="userinfo", description="👤 Muestra información detallada de un usuario")
-@app_commands.describe(usuario="Usuario del que quieres ver la información")
-async def cmd_userinfo(interaction: discord.Interaction, usuario: discord.Member = None):
-    usuario = usuario or interaction.user
-    roles = [r.mention for r in reversed(usuario.roles) if r.name != "@everyone"]
-    e = _e(f"Información de {usuario.display_name}")
-    e.set_thumbnail(url=usuario.display_avatar.url)
-    e.add_field(name="Usuario", value=f"`{usuario}`", inline=True)
-    e.add_field(name="ID", value=f"`{usuario.id}`", inline=True)
-    e.add_field(name="Bot", value=f"`{'Sí' if usuario.bot else 'No'}`", inline=True)
-    e.add_field(name="Cuenta creada", value=f"<t:{int(usuario.created_at.timestamp())}:R>", inline=True)
-    e.add_field(name="Se unió", value=f"<t:{int(usuario.joined_at.timestamp())}:R>" if usuario.joined_at else "`N/A`", inline=True)
-    e.add_field(name="Rol más alto", value=usuario.top_role.mention if usuario.top_role else "`N/A`", inline=True)
-    e.add_field(name=f"Roles [{len(roles)}]", value=" ".join(roles[:15]) if roles else "`Ninguno`", inline=False)
+@bot.tree.command(name="userinfo", description="👤 Show detailed information about a user")
+@app_commands.describe(user="User to look up")
+async def cmd_userinfo(interaction: discord.Interaction, user: discord.Member = None):
+    user = user or interaction.user
+    roles = [r.mention for r in reversed(user.roles) if r.name != "@everyone"]
+    e = _e(f"{user.display_name}'s Information")
+    e.set_thumbnail(url=user.display_avatar.url)
+    e.add_field(name="User", value=f"`{user}`", inline=True)
+    e.add_field(name="ID", value=f"`{user.id}`", inline=True)
+    e.add_field(name="Bot", value=f"`{'Yes' if user.bot else 'No'}`", inline=True)
+    e.add_field(name="Account Created", value=f"<t:{int(user.created_at.timestamp())}:R>", inline=True)
+    e.add_field(name="Joined", value=f"<t:{int(user.joined_at.timestamp())}:R>" if user.joined_at else "`N/A`", inline=True)
+    e.add_field(name="Highest Role", value=user.top_role.mention if user.top_role else "`N/A`", inline=True)
+    e.add_field(name=f"Roles [{len(roles)}]", value=" ".join(roles[:15]) if roles else "`None`", inline=False)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="serverinfo", description="📋 Muestra información del servidor")
+@bot.tree.command(name="serverinfo", description="📋 Show server information")
 async def cmd_serverinfo(interaction: discord.Interaction):
     g = interaction.guild
     if g is None:
-        return await _send_error(interaction, "Este comando solo funciona dentro de un servidor.")
+        return await _send_error(interaction, "This command only works inside a server.")
     e = _e(g.name)
     if g.icon:
         e.set_thumbnail(url=g.icon.url)
     e.add_field(name="ID", value=f"`{g.id}`", inline=True)
-    e.add_field(name="Dueño", value=g.owner.mention if g.owner else "`Desconocido`", inline=True)
-    e.add_field(name="Miembros", value=f"`{g.member_count}`", inline=True)
-    e.add_field(name="Canales", value=f"`{len(g.channels)}`", inline=True)
+    e.add_field(name="Owner", value=g.owner.mention if g.owner else "`Unknown`", inline=True)
+    e.add_field(name="Members", value=f"`{g.member_count}`", inline=True)
+    e.add_field(name="Channels", value=f"`{len(g.channels)}`", inline=True)
     e.add_field(name="Roles", value=f"`{len(g.roles)}`", inline=True)
     e.add_field(name="Boosts", value=f"`{g.premium_subscription_count}`", inline=True)
-    e.add_field(name="Creado", value=f"<t:{int(g.created_at.timestamp())}:R>", inline=True)
+    e.add_field(name="Created", value=f"<t:{int(g.created_at.timestamp())}:R>", inline=True)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="servericon", description="🖼️ Muestra el ícono del servidor")
+@bot.tree.command(name="servericon", description="🖼️ Show the server's icon")
 async def cmd_servericon(interaction: discord.Interaction):
     g = interaction.guild
     if not g.icon:
-        return await interaction.response.send_message(embed=_e("Sin Ícono", "Este servidor no tiene un ícono configurado.", C_WARN))
-    e = _e(f"Ícono de {g.name}")
+        return await interaction.response.send_message(embed=_e("No Icon", "This server doesn't have an icon set.", C_WARN))
+    e = _e(f"{g.name}'s Icon")
     e.set_image(url=g.icon.url)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="serverbanner", description="🎴 Muestra el banner del servidor")
+@bot.tree.command(name="serverbanner", description="🎴 Show the server's banner")
 async def cmd_serverbanner(interaction: discord.Interaction):
     g = interaction.guild
     if not g.banner:
-        return await interaction.response.send_message(embed=_e("Sin Banner", "Este servidor no tiene un banner configurado.", C_WARN))
-    e = _e(f"Banner de {g.name}")
+        return await interaction.response.send_message(embed=_e("No Banner", "This server doesn't have a banner set.", C_WARN))
+    e = _e(f"{g.name}'s Banner")
     e.set_image(url=g.banner.url)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="roleinfo", description="🎭 Muestra información de un rol específico")
-@app_commands.describe(rol="Rol del que quieres ver la información")
-async def cmd_roleinfo(interaction: discord.Interaction, rol: discord.Role):
-    e = discord.Embed(title=f"{EMOJI_GREEN_DOT} Información del Rol", color=rol.color if rol.color.value else C_GREEN, timestamp=datetime.now(timezone.utc))
-    e.add_field(name="Nombre", value=f"`{rol.name}`", inline=True)
-    e.add_field(name="ID", value=f"`{rol.id}`", inline=True)
-    e.add_field(name="Color", value=f"`{str(rol.color)}`", inline=True)
-    e.add_field(name="Miembros con este rol", value=f"`{len(rol.members)}`", inline=True)
-    e.add_field(name="Posición", value=f"`{rol.position}`", inline=True)
-    e.add_field(name="Mencionable", value=f"`{'Sí' if rol.mentionable else 'No'}`", inline=True)
+@bot.tree.command(name="roleinfo", description="🎭 Show information about a specific role")
+@app_commands.describe(role="Role to look up")
+async def cmd_roleinfo(interaction: discord.Interaction, role: discord.Role):
+    e = discord.Embed(title=f"{EMOJI_GREEN_DOT} Role Information", color=role.color if role.color.value else C_GREEN, timestamp=datetime.now(timezone.utc))
+    e.add_field(name="Name", value=f"`{role.name}`", inline=True)
+    e.add_field(name="ID", value=f"`{role.id}`", inline=True)
+    e.add_field(name="Color", value=f"`{str(role.color)}`", inline=True)
+    e.add_field(name="Members with this role", value=f"`{len(role.members)}`", inline=True)
+    e.add_field(name="Position", value=f"`{role.position}`", inline=True)
+    e.add_field(name="Mentionable", value=f"`{'Yes' if role.mentionable else 'No'}`", inline=True)
     e.set_footer(text=_footer())
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="channelinfo", description="📂 Muestra información del canal actual")
+@bot.tree.command(name="channelinfo", description="📂 Show information about the current channel")
 async def cmd_channelinfo(interaction: discord.Interaction):
     ch = interaction.channel
-    e = _e(f"Información de #{ch.name}")
+    e = _e(f"#{ch.name} Information")
     e.add_field(name="ID", value=f"`{ch.id}`", inline=True)
-    e.add_field(name="Tipo", value=f"`{ch.type}`", inline=True)
-    e.add_field(name="Creado", value=f"<t:{int(ch.created_at.timestamp())}:R>", inline=True)
+    e.add_field(name="Type", value=f"`{ch.type}`", inline=True)
+    e.add_field(name="Created", value=f"<t:{int(ch.created_at.timestamp())}:R>", inline=True)
     if isinstance(ch, discord.TextChannel):
-        e.add_field(name="Categoría", value=f"`{ch.category.name if ch.category else 'Ninguna'}`", inline=True)
-        e.add_field(name="Modo Lento", value=f"`{ch.slowmode_delay}s`", inline=True)
-        e.add_field(name="NSFW", value=f"`{'Sí' if ch.is_nsfw() else 'No'}`", inline=True)
+        e.add_field(name="Category", value=f"`{ch.category.name if ch.category else 'None'}`", inline=True)
+        e.add_field(name="Slowmode", value=f"`{ch.slowmode_delay}s`", inline=True)
+        e.add_field(name="NSFW", value=f"`{'Yes' if ch.is_nsfw() else 'No'}`", inline=True)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="membercount", description="👥 Muestra la cantidad de miembros del servidor")
+@bot.tree.command(name="membercount", description="👥 Show the server's member count")
 async def cmd_membercount(interaction: discord.Interaction):
     g = interaction.guild
-    humanos = sum(1 for m in g.members if not m.bot)
+    humans = sum(1 for m in g.members if not m.bot)
     bots = sum(1 for m in g.members if m.bot)
-    e = _e("Miembros del Servidor")
-    e.add_field(name="Humanos", value=f"`{humanos}`", inline=True)
+    e = _e("Server Members")
+    e.add_field(name="Humans", value=f"`{humans}`", inline=True)
     e.add_field(name="Bots", value=f"`{bots}`", inline=True)
     e.add_field(name="Total", value=f"`{g.member_count}`", inline=True)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="emojicount", description="😃 Muestra la cantidad de emojis del servidor")
+@bot.tree.command(name="emojicount", description="😃 Show the server's emoji count")
 async def cmd_emojicount(interaction: discord.Interaction):
     g = interaction.guild
-    estaticos = sum(1 for em in g.emojis if not em.animated)
-    animados = sum(1 for em in g.emojis if em.animated)
-    e = _e("Emojis del Servidor")
-    e.add_field(name="Estáticos", value=f"`{estaticos}`", inline=True)
-    e.add_field(name="Animados", value=f"`{animados}`", inline=True)
+    static_count = sum(1 for em in g.emojis if not em.animated)
+    animated_count = sum(1 for em in g.emojis if em.animated)
+    e = _e("Server Emojis")
+    e.add_field(name="Static", value=f"`{static_count}`", inline=True)
+    e.add_field(name="Animated", value=f"`{animated_count}`", inline=True)
     e.add_field(name="Total", value=f"`{len(g.emojis)}`", inline=True)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="botpermissions", description="🔐 Muestra los permisos del bot en este canal")
+@bot.tree.command(name="botpermissions", description="🔐 Show the bot's permissions in this channel")
 async def cmd_botpermissions(interaction: discord.Interaction):
     perms = interaction.channel.permissions_for(interaction.guild.me)
-    activos = [p.replace("_", " ").title() for p, v in perms if v]
-    desc = ", ".join(f"`{p}`" for p in activos[:25])
-    await interaction.response.send_message(embed=_e("Permisos del Bot", desc or "Ninguno"))
+    active = [p.replace("_", " ").title() for p, v in perms if v]
+    desc = ", ".join(f"`{p}`" for p in active[:25])
+    await interaction.response.send_message(embed=_e("Bot Permissions", desc or "None"))
 
-@bot.tree.command(name="poll", description="📊 Crear una encuesta rápida")
-@app_commands.describe(pregunta="Pregunta de la encuesta")
-async def cmd_poll(interaction: discord.Interaction, pregunta: str):
-    e = _e("Nueva Encuesta", pregunta)
-    e.set_footer(text=f"Encuesta por {interaction.user.display_name} • {_footer()}")
+@bot.tree.command(name="poll", description="📊 Create a quick poll")
+@app_commands.describe(question="Poll question")
+async def cmd_poll(interaction: discord.Interaction, question: str):
+    e = _e("New Poll", question)
+    e.set_footer(text=f"Poll by {interaction.user.display_name} • {_footer()}")
     await interaction.response.send_message(embed=e)
     msg = await interaction.original_response()
     await msg.add_reaction("👍")
     await msg.add_reaction("👎")
 
-@bot.tree.command(name="calc", description="🧮 Calculadora simple")
-@app_commands.describe(expresion="Expresión matemática, ej: (5+3)*2")
-async def cmd_calc(interaction: discord.Interaction, expresion: str):
-    if not re.match(r"^[0-9+\-*/().\s%]+$", expresion):
-        return await _send_error(interaction, "Solo se permiten números y operadores matemáticos (+ - * / % ( )).")
+@bot.tree.command(name="calc", description="🧮 Simple calculator")
+@app_commands.describe(expression="Math expression, e.g. (5+3)*2")
+async def cmd_calc(interaction: discord.Interaction, expression: str):
+    if not re.match(r"^[0-9+\-*/().\s%]+$", expression):
+        return await _send_error(interaction, "Only numbers and math operators are allowed (+ - * / % ( )).")
     try:
-        resultado = eval(expresion, {"__builtins__": {}}, {})
-        await interaction.response.send_message(embed=_e("Calculadora", f"`{expresion}` = `{resultado}`"))
+        result = eval(expression, {"__builtins__": {}}, {})
+        await interaction.response.send_message(embed=_e("Calculator", f"`{expression}` = `{result}`"))
     except Exception:
-        await _send_error(interaction, "No se pudo calcular esa expresión.")
+        await _send_error(interaction, "Couldn't calculate that expression.")
 
-@bot.tree.command(name="timestamp", description="🕒 Convierte una fecha a timestamp de Discord")
-@app_commands.describe(fecha="Formato: AAAA-MM-DD HH:MM (24h)")
-async def cmd_timestamp(interaction: discord.Interaction, fecha: str):
+@bot.tree.command(name="timestamp", description="🕒 Convert a date to a Discord timestamp")
+@app_commands.describe(date="Format: YYYY-MM-DD HH:MM (24h)")
+async def cmd_timestamp(interaction: discord.Interaction, date: str):
     try:
-        dt = datetime.strptime(fecha, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+        dt = datetime.strptime(date, "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
         ts = int(dt.timestamp())
         desc = f"`<t:{ts}:F>` → <t:{ts}:F>\n`<t:{ts}:R>` → <t:{ts}:R>"
-        await interaction.response.send_message(embed=_e("Timestamp Generado", desc))
+        await interaction.response.send_message(embed=_e("Timestamp Generated", desc))
     except ValueError:
-        await _send_error(interaction, "Formato inválido. Usa: `AAAA-MM-DD HH:MM` (ej: `2026-12-25 18:00`).")
+        await _send_error(interaction, "Invalid format. Use: `YYYY-MM-DD HH:MM` (e.g. `2026-12-25 18:00`).")
 
-@bot.tree.command(name="remindme", description="⏰ Crear un recordatorio personal")
-@app_commands.describe(minutos="En cuántos minutos recordarte", mensaje="Qué quieres que te recuerde")
-async def cmd_remindme(interaction: discord.Interaction, minutos: int, mensaje: str):
-    if minutos < 1 or minutos > 10080:
-        return await _send_error(interaction, "Los minutos deben estar entre `1` y `10080` (7 días).")
-    await interaction.response.send_message(embed=_e("Recordatorio Creado", f"Te recordaré en `{minutos}` min: {mensaje}"))
+@bot.tree.command(name="remindme", description="⏰ Create a personal reminder")
+@app_commands.describe(minutes="In how many minutes to remind you", message="What you want to be reminded of")
+async def cmd_remindme(interaction: discord.Interaction, minutes: int, message: str):
+    if minutes < 1 or minutes > 10080:
+        return await _send_error(interaction, "Minutes must be between `1` and `10080` (7 days).")
+    await interaction.response.send_message(embed=_e("Reminder Created", f"I'll remind you in `{minutes}` min: {message}"))
 
     async def remind_later():
-        await asyncio.sleep(minutos * 60)
+        await asyncio.sleep(minutes * 60)
         try:
-            await interaction.user.send(embed=_e("⏰ Recordatorio", mensaje))
+            await interaction.user.send(embed=_e("⏰ Reminder", message))
         except Exception:
             try:
-                await interaction.channel.send(f"{interaction.user.mention} ⏰ Recordatorio: {mensaje}")
+                await interaction.channel.send(f"{interaction.user.mention} ⏰ Reminder: {message}")
             except Exception:
                 pass
 
@@ -1106,238 +1143,238 @@ async def cmd_remindme(interaction: discord.Interaction, minutos: int, mensaje: 
 
 
 # ══════════════════════════════════════════════════════════════
-#  BÚSQUEDA
+#  SEARCH
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="wikipedia", description="📚 Buscar en Wikipedia")
-@app_commands.describe(busqueda="Qué quieres buscar")
-async def cmd_wikipedia(interaction: discord.Interaction, busqueda: str):
+@bot.tree.command(name="wikipedia", description="📚 Search Wikipedia")
+@app_commands.describe(query="What you want to search for")
+async def cmd_wikipedia(interaction: discord.Interaction, query: str):
     await interaction.response.defer()
     try:
-        r = requests.get(f"https://es.wikipedia.org/api/rest_v1/page/summary/{quote(busqueda)}", timeout=10)
+        r = requests.get(f"https://en.wikipedia.org/api/rest_v1/page/summary/{quote(query)}", timeout=10)
         if r.status_code != 200:
-            return await interaction.followup.send(embed=_e("Sin Resultados", "No se encontró el artículo.", C_WARN))
+            return await interaction.followup.send(embed=_e("No Results", "Article not found.", C_WARN))
         data = r.json()
-        e = _e(data.get("title", busqueda), data.get("extract", "")[:1500])
+        e = _e(data.get("title", query), data.get("extract", "")[:1500])
         if data.get("thumbnail"):
             e.set_thumbnail(url=data["thumbnail"]["source"])
         await interaction.followup.send(embed=e)
     except Exception:
-        await interaction.followup.send(embed=_e("Error", "Error al buscar en Wikipedia.", C_ERROR))
+        await interaction.followup.send(embed=_e("Error", "Error searching Wikipedia.", C_ERROR))
 
-@bot.tree.command(name="youtube", description="▶️ Buscar en YouTube")
-@app_commands.describe(busqueda="Qué quieres buscar")
-async def cmd_youtube(interaction: discord.Interaction, busqueda: str):
-    url = f"https://www.youtube.com/results?search_query={quote(busqueda)}"
-    await interaction.response.send_message(embed=_e("Resultado de YouTube", f"[Buscar: {busqueda}]({url})"))
+@bot.tree.command(name="youtube", description="▶️ Search YouTube")
+@app_commands.describe(query="What you want to search for")
+async def cmd_youtube(interaction: discord.Interaction, query: str):
+    url = f"https://www.youtube.com/results?search_query={quote(query)}"
+    await interaction.response.send_message(embed=_e("YouTube Result", f"[Search: {query}]({url})"))
 
-@bot.tree.command(name="google", description="🔍 Buscar en Google")
-@app_commands.describe(busqueda="Qué quieres buscar")
-async def cmd_google(interaction: discord.Interaction, busqueda: str):
-    url = f"https://www.google.com/search?q={quote(busqueda)}"
-    await interaction.response.send_message(embed=_e("Resultado de Google", f"[Buscar: {busqueda}]({url})"))
+@bot.tree.command(name="google", description="🔍 Search Google")
+@app_commands.describe(query="What you want to search for")
+async def cmd_google(interaction: discord.Interaction, query: str):
+    url = f"https://www.google.com/search?q={quote(query)}"
+    await interaction.response.send_message(embed=_e("Google Result", f"[Search: {query}]({url})"))
 
-@bot.tree.command(name="translate", description="🌐 Traducir un texto")
-@app_commands.describe(texto="Texto a traducir", idioma="Código de idioma destino (ej: en, es, fr)")
-async def cmd_translate(interaction: discord.Interaction, texto: str, idioma: str = "en"):
+@bot.tree.command(name="translate", description="🌐 Translate a text")
+@app_commands.describe(text="Text to translate", language="Target language code (e.g. en, es, fr)")
+async def cmd_translate(interaction: discord.Interaction, text: str, language: str = "en"):
     await interaction.response.defer()
     try:
-        r = requests.get("https://api.mymemory.translated.net/get", params={"q": texto, "langpair": f"auto|{idioma}"}, timeout=10).json()
-        traduccion = r["responseData"]["translatedText"]
-        await interaction.followup.send(embed=_e("Traducción", f"**Original:** {texto}\n**Traducido ({idioma}):** {traduccion}"))
+        r = requests.get("https://api.mymemory.translated.net/get", params={"q": text, "langpair": f"auto|{language}"}, timeout=10).json()
+        translation = r["responseData"]["translatedText"]
+        await interaction.followup.send(embed=_e("Translation", f"**Original:** {text}\n**Translated ({language}):** {translation}"))
     except Exception:
-        await interaction.followup.send(embed=_e("Error", "Error al traducir el texto.", C_ERROR))
+        await interaction.followup.send(embed=_e("Error", "Error translating the text.", C_ERROR))
 
-@bot.tree.command(name="weather", description="⛅ Ver el clima de una ciudad")
-@app_commands.describe(ciudad="Nombre de la ciudad")
-async def cmd_weather(interaction: discord.Interaction, ciudad: str):
+@bot.tree.command(name="weather", description="⛅ Check the weather in a city")
+@app_commands.describe(city="City name")
+async def cmd_weather(interaction: discord.Interaction, city: str):
     await interaction.response.defer()
     try:
-        geo = requests.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": ciudad, "count": 1}, timeout=10).json()
+        geo = requests.get("https://geocoding-api.open-meteo.com/v1/search", params={"name": city, "count": 1}, timeout=10).json()
         if not geo.get("results"):
-            return await interaction.followup.send(embed=_e("Ciudad No Encontrada", "Verifica el nombre e intenta de nuevo.", C_WARN))
+            return await interaction.followup.send(embed=_e("City Not Found", "Check the name and try again.", C_WARN))
         loc = geo["results"][0]
         w = requests.get("https://api.open-meteo.com/v1/forecast", params={"latitude": loc["latitude"], "longitude": loc["longitude"], "current_weather": True}, timeout=10).json()
         cw = w.get("current_weather", {})
-        e = _e(f"Clima en {loc['name']}", f"🌡️ Temperatura: `{cw.get('temperature')}°C`\n💨 Viento: `{cw.get('windspeed')} km/h`")
+        e = _e(f"Weather in {loc['name']}", f"🌡️ Temperature: `{cw.get('temperature')}°C`\n💨 Wind: `{cw.get('windspeed')} km/h`")
         await interaction.followup.send(embed=e)
     except Exception:
-        await interaction.followup.send(embed=_e("Error", "Error al obtener el clima.", C_ERROR))
+        await interaction.followup.send(embed=_e("Error", "Error fetching the weather.", C_ERROR))
 
 
 # ══════════════════════════════════════════════════════════════
-#  ECONOMÍA
+#  ECONOMY
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="balance", description="💰 Ver tu saldo o el de otro usuario")
-@app_commands.describe(usuario="Usuario a consultar")
-async def cmd_balance(interaction: discord.Interaction, usuario: discord.Member = None):
-    u = usuario or interaction.user
+@bot.tree.command(name="balance", description="💰 Check your balance or another user's")
+@app_commands.describe(user="User to check")
+async def cmd_balance(interaction: discord.Interaction, user: discord.Member = None):
+    u = user or interaction.user
     data = get_eco(u.id)
-    await interaction.response.send_message(embed=_e(f"Saldo de {u.display_name}", f"`{data['bal']}` monedas."))
+    await interaction.response.send_message(embed=_e(f"{u.display_name}'s Balance", f"`{data['bal']}` coins."))
 
-@bot.tree.command(name="daily", description="🎁 Reclamar tu recompensa diaria")
+@bot.tree.command(name="daily", description="🎁 Claim your daily reward")
 async def cmd_daily(interaction: discord.Interaction):
     data = get_eco(interaction.user.id)
     now = int(time.time())
     if now - data["daily"] < 86400:
-        restante = 86400 - (now - data["daily"])
-        return await interaction.response.send_message(embed=_e("Espera un Poco", f"Ya reclamaste tu daily. Vuelve en `{restante // 3600}h {(restante % 3600) // 60}m`.", C_WARN), ephemeral=True)
+        remaining = 86400 - (now - data["daily"])
+        return await interaction.response.send_message(embed=_e("Wait a Bit", f"You already claimed your daily. Come back in `{remaining // 3600}h {(remaining % 3600) // 60}m`.", C_WARN), ephemeral=True)
     data["bal"] += 100
     data["daily"] = now
     save_data("economy", economy_data)
-    await interaction.response.send_message(embed=_e("Recompensa Diaria", f"Recibiste `100` monedas. Saldo: `{data['bal']}`"))
+    await interaction.response.send_message(embed=_e("Daily Reward", f"You received `100` coins. Balance: `{data['bal']}`"))
 
-@bot.tree.command(name="work", description="💼 Trabajar y ganar monedas")
+@bot.tree.command(name="work", description="💼 Work and earn coins")
 async def cmd_work(interaction: discord.Interaction):
     data = get_eco(interaction.user.id)
     now = int(time.time())
     if now - data.get("work", 0) < 3600:
-        restante = 3600 - (now - data.get("work", 0))
-        return await interaction.response.send_message(embed=_e("Aún Cansado", f"Debes esperar `{restante // 60}m` para trabajar de nuevo.", C_WARN), ephemeral=True)
+        remaining = 3600 - (now - data.get("work", 0))
+        return await interaction.response.send_message(embed=_e("Still Tired", f"You must wait `{remaining // 60}m` before working again.", C_WARN), ephemeral=True)
     earned = random.randint(20, 50)
     data["bal"] += earned
     data["work"] = now
     save_data("economy", economy_data)
-    await interaction.response.send_message(embed=_e("Trabajo Completado", f"Ganaste `{earned}` monedas."))
+    await interaction.response.send_message(embed=_e("Work Completed", f"You earned `{earned}` coins."))
 
-@bot.tree.command(name="beg", description="🙏 Pedir monedas (a veces funciona)")
+@bot.tree.command(name="beg", description="🙏 Beg for coins (sometimes works)")
 async def cmd_beg(interaction: discord.Interaction):
     data = get_eco(interaction.user.id)
     if random.random() < 0.5:
         earned = random.randint(1, 30)
         data["bal"] += earned
         save_data("economy", economy_data)
-        await interaction.response.send_message(embed=_e("¡Alguien te ayudó!", f"Recibiste `{earned}` monedas."))
+        await interaction.response.send_message(embed=_e("Someone helped you!", f"You received `{earned}` coins."))
     else:
-        await interaction.response.send_message(embed=_e("Nadie te ayudó", "Intenta de nuevo más tarde.", C_WARN))
+        await interaction.response.send_message(embed=_e("No one helped you", "Try again later.", C_WARN))
 
-@bot.tree.command(name="pay", description="💸 Pagar a otro usuario")
-@app_commands.describe(usuario="A quién pagar", cantidad="Cantidad de monedas")
-async def cmd_pay(interaction: discord.Interaction, usuario: discord.Member, cantidad: int):
-    if cantidad <= 0:
-        return await _send_error(interaction, "La cantidad debe ser mayor a 0.")
-    if usuario.id == interaction.user.id:
-        return await _send_error(interaction, "No puedes pagarte a ti mismo.")
+@bot.tree.command(name="pay", description="💸 Pay another user")
+@app_commands.describe(user="Who to pay", amount="Amount of coins")
+async def cmd_pay(interaction: discord.Interaction, user: discord.Member, amount: int):
+    if amount <= 0:
+        return await _send_error(interaction, "The amount must be greater than 0.")
+    if user.id == interaction.user.id:
+        return await _send_error(interaction, "You can't pay yourself.")
     d1 = get_eco(interaction.user.id)
-    d2 = get_eco(usuario.id)
-    if d1["bal"] < cantidad:
-        return await _send_error(interaction, "Saldo insuficiente.")
-    d1["bal"] -= cantidad
-    d2["bal"] += cantidad
+    d2 = get_eco(user.id)
+    if d1["bal"] < amount:
+        return await _send_error(interaction, "Insufficient balance.")
+    d1["bal"] -= amount
+    d2["bal"] += amount
     save_data("economy", economy_data)
-    await interaction.response.send_message(embed=_e("Pago Realizado", f"{interaction.user.mention} pagó `{cantidad}` monedas a {usuario.mention}."))
+    await interaction.response.send_message(embed=_e("Payment Sent", f"{interaction.user.mention} paid `{amount}` coins to {user.mention}."))
 
-@bot.tree.command(name="rob", description="🥷 Intentar robar monedas a otro usuario")
-@app_commands.describe(usuario="A quién robar")
-async def cmd_rob(interaction: discord.Interaction, usuario: discord.Member):
-    if usuario.id == interaction.user.id:
-        return await _send_error(interaction, "No puedes robarte a ti mismo.")
+@bot.tree.command(name="rob", description="🥷 Try to steal coins from another user")
+@app_commands.describe(user="Who to rob")
+async def cmd_rob(interaction: discord.Interaction, user: discord.Member):
+    if user.id == interaction.user.id:
+        return await _send_error(interaction, "You can't rob yourself.")
     robber = get_eco(interaction.user.id)
-    victim = get_eco(usuario.id)
+    victim = get_eco(user.id)
     now = int(time.time())
     if now - robber.get("rob", 0) < 1800:
-        restante = 1800 - (now - robber.get("rob", 0))
-        return await interaction.response.send_message(embed=_e("Cuidado", f"Debes esperar `{restante // 60}m` para volver a robar.", C_WARN), ephemeral=True)
+        remaining = 1800 - (now - robber.get("rob", 0))
+        return await interaction.response.send_message(embed=_e("Careful", f"You must wait `{remaining // 60}m` before robbing again.", C_WARN), ephemeral=True)
     robber["rob"] = now
     if victim["bal"] < 20:
         save_data("economy", economy_data)
-        return await interaction.response.send_message(embed=_e("Robo Fallido", f"{usuario.mention} no tiene suficientes monedas para robar."))
+        return await interaction.response.send_message(embed=_e("Robbery Failed", f"{user.mention} doesn't have enough coins to rob."))
     if random.random() < 0.5:
-        cantidad = random.randint(10, min(100, victim["bal"]))
-        victim["bal"] -= cantidad
-        robber["bal"] += cantidad
+        amount = random.randint(10, min(100, victim["bal"]))
+        victim["bal"] -= amount
+        robber["bal"] += amount
         save_data("economy", economy_data)
-        await interaction.response.send_message(embed=_e("¡Robo Exitoso!", f"Robaste `{cantidad}` monedas a {usuario.mention}."))
+        await interaction.response.send_message(embed=_e("Robbery Successful!", f"You stole `{amount}` coins from {user.mention}."))
     else:
-        multa = min(30, robber["bal"])
-        robber["bal"] -= multa
+        fine = min(30, robber["bal"])
+        robber["bal"] -= fine
         save_data("economy", economy_data)
-        await interaction.response.send_message(embed=_e("Robo Fallido", f"Te atraparon y perdiste `{multa}` monedas.", C_ERROR))
+        await interaction.response.send_message(embed=_e("Robbery Failed", f"You got caught and lost `{fine}` coins.", C_ERROR))
 
-@bot.tree.command(name="slots", description="🎰 Jugar a la tragamonedas")
-@app_commands.describe(apuesta="Cantidad de monedas a apostar")
-async def cmd_slots(interaction: discord.Interaction, apuesta: int):
+@bot.tree.command(name="slots", description="🎰 Play the slot machine")
+@app_commands.describe(bet="Amount of coins to bet")
+async def cmd_slots(interaction: discord.Interaction, bet: int):
     data = get_eco(interaction.user.id)
-    if apuesta <= 0:
-        return await _send_error(interaction, "La apuesta debe ser mayor a 0.")
-    if data["bal"] < apuesta:
-        return await _send_error(interaction, "Saldo insuficiente.")
-    simbolos = ["🍒", "🍋", "🍇", "🔔", "⭐", "💎"]
-    resultado = [random.choice(simbolos) for _ in range(3)]
-    linea = " | ".join(resultado)
-    if resultado[0] == resultado[1] == resultado[2]:
-        ganancia = apuesta * 5
-        data["bal"] += ganancia
-        desc = f"{linea}\n\n¡Jackpot! Ganaste `{ganancia}` monedas."
+    if bet <= 0:
+        return await _send_error(interaction, "The bet must be greater than 0.")
+    if data["bal"] < bet:
+        return await _send_error(interaction, "Insufficient balance.")
+    symbols = ["🍒", "🍋", "🍇", "🔔", "⭐", "💎"]
+    result = [random.choice(symbols) for _ in range(3)]
+    line = " | ".join(result)
+    if result[0] == result[1] == result[2]:
+        winnings = bet * 5
+        data["bal"] += winnings
+        desc = f"{line}\n\nJackpot! You won `{winnings}` coins."
         color = C_GREEN
-    elif len(set(resultado)) == 2:
-        ganancia = apuesta * 2
-        data["bal"] += ganancia
-        desc = f"{linea}\n\nGanaste `{ganancia}` monedas."
+    elif len(set(result)) == 2:
+        winnings = bet * 2
+        data["bal"] += winnings
+        desc = f"{line}\n\nYou won `{winnings}` coins."
         color = C_GREEN
     else:
-        data["bal"] -= apuesta
-        desc = f"{linea}\n\nPerdiste `{apuesta}` monedas."
+        data["bal"] -= bet
+        desc = f"{line}\n\nYou lost `{bet}` coins."
         color = C_ERROR
     save_data("economy", economy_data)
-    await interaction.response.send_message(embed=_e("Tragamonedas", desc, color))
+    await interaction.response.send_message(embed=_e("Slot Machine", desc, color))
 
-@bot.tree.command(name="baltop", description="🏆 Top de usuarios más ricos del servidor")
+@bot.tree.command(name="baltop", description="🏆 Top richest users in the server")
 async def cmd_baltop(interaction: discord.Interaction):
     ranked = sorted(economy_data.items(), key=lambda x: x[1]["bal"], reverse=True)[:10]
     if not ranked:
-        return await interaction.response.send_message(embed=_e("Top de Riqueza", "No hay datos aún."))
+        return await interaction.response.send_message(embed=_e("Wealth Leaderboard", "No data yet."))
     desc = ""
     for i, (uid, info) in enumerate(ranked, start=1):
         member = interaction.guild.get_member(int(uid)) if interaction.guild else None
-        name = member.display_name if member else f"Usuario {uid}"
-        desc += f"**{i}.** {name} — `{info['bal']}` monedas\n"
-    await interaction.response.send_message(embed=_e("Top de Riqueza", desc))
+        name = member.display_name if member else f"User {uid}"
+        desc += f"**{i}.** {name} — `{info['bal']}` coins\n"
+    await interaction.response.send_message(embed=_e("Wealth Leaderboard", desc))
 
 
 # ══════════════════════════════════════════════════════════════
-#  NIVELES
+#  LEVELS
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="rank", description="📈 Ver tu rango de nivel")
-@app_commands.describe(usuario="Usuario a consultar")
-async def cmd_rank(interaction: discord.Interaction, usuario: discord.Member = None):
-    u = usuario or interaction.user
+@bot.tree.command(name="rank", description="📈 Check your level rank")
+@app_commands.describe(user="User to check")
+async def cmd_rank(interaction: discord.Interaction, user: discord.Member = None):
+    u = user or interaction.user
     lvl = get_level(interaction.guild_id, u.id)
     needed = xp_needed(lvl["level"])
-    await interaction.response.send_message(embed=_e(f"Rango de {u.display_name}", f"Nivel: `{lvl['level']}`\nXP: `{lvl['xp']}/{needed}`"))
+    await interaction.response.send_message(embed=_e(f"{u.display_name}'s Rank", f"Level: `{lvl['level']}`\nXP: `{lvl['xp']}/{needed}`"))
 
-@bot.tree.command(name="level", description="📊 Ver tu nivel actual")
-@app_commands.describe(usuario="Usuario a consultar")
-async def cmd_level(interaction: discord.Interaction, usuario: discord.Member = None):
-    u = usuario or interaction.user
+@bot.tree.command(name="level", description="📊 Check your current level")
+@app_commands.describe(user="User to check")
+async def cmd_level(interaction: discord.Interaction, user: discord.Member = None):
+    u = user or interaction.user
     lvl = get_level(interaction.guild_id, u.id)
-    await interaction.response.send_message(embed=_e(f"Nivel de {u.display_name}", f"Nivel: `{lvl['level']}`"))
+    await interaction.response.send_message(embed=_e(f"{u.display_name}'s Level", f"Level: `{lvl['level']}`"))
 
-@bot.tree.command(name="xptop", description="🏆 Tabla de líderes por XP del servidor")
+@bot.tree.command(name="xptop", description="🏆 Server XP leaderboard")
 async def cmd_xptop(interaction: discord.Interaction):
     gid = str(interaction.guild_id)
     data = levels_data.get(gid, {})
     ranked = sorted(data.items(), key=lambda x: (x[1]["level"], x[1]["xp"]), reverse=True)[:10]
     if not ranked:
-        return await interaction.response.send_message(embed=_e("Tabla de Líderes", "No hay datos de niveles aún."))
+        return await interaction.response.send_message(embed=_e("Leaderboard", "No level data yet."))
     desc = ""
     for i, (uid, info) in enumerate(ranked, start=1):
         member = interaction.guild.get_member(int(uid))
-        name = member.display_name if member else f"Usuario {uid}"
-        desc += f"**{i}.** {name} — Nivel `{info['level']}` (`{info['xp']}` XP)\n"
-    await interaction.response.send_message(embed=_e("Tabla de Líderes", desc))
+        name = member.display_name if member else f"User {uid}"
+        desc += f"**{i}.** {name} — Level `{info['level']}` (`{info['xp']}` XP)\n"
+    await interaction.response.send_message(embed=_e("Leaderboard", desc))
 
-@bot.tree.command(name="setlevel", description="🔧 [Admin] Establecer el nivel de un usuario")
-@app_commands.describe(usuario="Usuario", nivel="Nuevo nivel")
+@bot.tree.command(name="setlevel", description="🔧 [Admin] Set a user's level")
+@app_commands.describe(user="User", level="New level")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_setlevel(interaction: discord.Interaction, usuario: discord.Member, nivel: int):
-    lvl = get_level(interaction.guild_id, usuario.id)
-    lvl["level"] = max(0, nivel)
+async def cmd_setlevel(interaction: discord.Interaction, user: discord.Member, level: int):
+    lvl = get_level(interaction.guild_id, user.id)
+    lvl["level"] = max(0, level)
     lvl["xp"] = 0
     save_data("levels", levels_data)
-    await interaction.response.send_message(embed=_e("Nivel Establecido", f"{usuario.mention} ahora es nivel `{nivel}`."))
+    await interaction.response.send_message(embed=_e("Level Set", f"{user.mention} is now level `{level}`."))
 _perm_error_handler(cmd_setlevel)
 
 
@@ -1349,21 +1386,21 @@ class GiveawayView(View):
     def __init__(self, giveaway_id: str):
         super().__init__(timeout=None)
         self.giveaway_id = giveaway_id
-        btn = Button(label="Participar", emoji="🎉", style=discord.ButtonStyle.success, custom_id=f"ga_join_{giveaway_id}")
+        btn = Button(label="Enter", emoji="🎉", style=discord.ButtonStyle.success, custom_id=f"ga_join_{giveaway_id}")
         btn.callback = self.join_callback
         self.add_item(btn)
 
     async def join_callback(self, interaction: discord.Interaction):
         ga = giveaways_data.get(self.giveaway_id)
         if not ga or ga.get("ended"):
-            return await interaction.response.send_message("❌ Este sorteo ya finalizó.", ephemeral=True)
+            return await interaction.response.send_message("❌ This giveaway has already ended.", ephemeral=True)
         uid = str(interaction.user.id)
         if uid in ga["participants"]:
             ga["participants"].remove(uid)
-            msg = "❌ Saliste del sorteo."
+            msg = "❌ You left the giveaway."
         else:
             ga["participants"].append(uid)
-            msg = "🎉 ¡Ahora participas en el sorteo!"
+            msg = "🎉 You're now entered in the giveaway!"
         save_data("giveaways", giveaways_data)
         await interaction.response.send_message(msg, ephemeral=True)
 
@@ -1375,53 +1412,53 @@ async def _end_giveaway(giveaway_id: str, channel: discord.abc.Messageable):
     participants = ga["participants"]
     winners = random.sample(participants, min(ga["winners"], len(participants))) if participants else []
     save_data("giveaways", giveaways_data)
-    desc = f"Premio: **{ga['prize']}**\n"
-    desc += f"Ganadores: {', '.join(f'<@{w}>' for w in winners)}" if winners else "Nadie participó."
-    await channel.send(embed=_e("Sorteo Finalizado", desc))
+    desc = f"Prize: **{ga['prize']}**\n"
+    desc += f"Winners: {', '.join(f'<@{w}>' for w in winners)}" if winners else "No one participated."
+    await channel.send(embed=_e("Giveaway Ended", desc))
 
-@bot.tree.command(name="giveawaystart", description="🎉 [Admin] Crear un sorteo")
-@app_commands.describe(premio="Premio del sorteo", minutos="Duración en minutos", ganadores="Cantidad de ganadores")
+@bot.tree.command(name="giveawaystart", description="🎉 [Admin] Start a giveaway")
+@app_commands.describe(prize="Giveaway prize", minutes="Duration in minutes", winners="Number of winners")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_giveawaystart(interaction: discord.Interaction, premio: str, minutos: int, ganadores: int = 1):
+async def cmd_giveawaystart(interaction: discord.Interaction, prize: str, minutes: int, winners: int = 1):
     giveaway_id = str(int(time.time() * 1000))
-    end_ts = int(time.time()) + minutos * 60
-    e = _e("¡Sorteo Activo!", f"Premio: **{premio}**\nGanadores: `{ganadores}`\nTermina: <t:{end_ts}:R>")
+    end_ts = int(time.time()) + minutes * 60
+    e = _e("Giveaway Active!", f"Prize: **{prize}**\nWinners: `{winners}`\nEnds: <t:{end_ts}:R>")
     view = GiveawayView(giveaway_id)
     await interaction.response.send_message(embed=e, view=view)
     giveaways_data[giveaway_id] = {
-        "guild_id": interaction.guild_id, "prize": premio, "winners": ganadores,
+        "guild_id": interaction.guild_id, "prize": prize, "winners": winners,
         "participants": [], "end_ts": end_ts, "ended": False, "host": str(interaction.user.id),
     }
     save_data("giveaways", giveaways_data)
 
     async def auto_end():
-        await asyncio.sleep(minutos * 60)
+        await asyncio.sleep(minutes * 60)
         await _end_giveaway(giveaway_id, interaction.channel)
 
     asyncio.create_task(auto_end())
 _perm_error_handler(cmd_giveawaystart)
 
-@bot.tree.command(name="giveawayend", description="🏁 [Admin] Terminar un sorteo manualmente")
-@app_commands.describe(giveaway_id="ID del sorteo")
+@bot.tree.command(name="giveawayend", description="🏁 [Admin] End a giveaway manually")
+@app_commands.describe(giveaway_id="Giveaway ID")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_giveawayend(interaction: discord.Interaction, giveaway_id: str):
     if giveaway_id not in giveaways_data:
-        return await _send_error(interaction, "Sorteo no encontrado.")
-    await interaction.response.send_message(embed=_e("Finalizando", "Procesando sorteo..."), ephemeral=True)
+        return await _send_error(interaction, "Giveaway not found.")
+    await interaction.response.send_message(embed=_e("Ending", "Processing giveaway..."), ephemeral=True)
     await _end_giveaway(giveaway_id, interaction.channel)
 _perm_error_handler(cmd_giveawayend)
 
-@bot.tree.command(name="giveawayreroll", description="🔁 [Admin] Elegir un nuevo ganador")
-@app_commands.describe(giveaway_id="ID del sorteo")
+@bot.tree.command(name="giveawayreroll", description="🔁 [Admin] Pick a new winner")
+@app_commands.describe(giveaway_id="Giveaway ID")
 @app_commands.checks.has_permissions(administrator=True)
 async def cmd_giveawayreroll(interaction: discord.Interaction, giveaway_id: str):
     ga = giveaways_data.get(giveaway_id)
     if not ga:
-        return await _send_error(interaction, "Sorteo no encontrado.")
+        return await _send_error(interaction, "Giveaway not found.")
     if not ga["participants"]:
-        return await _send_error(interaction, "No hay participantes para el reroll.")
+        return await _send_error(interaction, "There are no participants for the reroll.")
     winner = random.choice(ga["participants"])
-    await interaction.response.send_message(embed=_e("Nuevo Ganador", f"🎉 El nuevo ganador es <@{winner}>!"))
+    await interaction.response.send_message(embed=_e("New Winner", f"🎉 The new winner is <@{winner}>!"))
 _perm_error_handler(cmd_giveawayreroll)
 
 
@@ -1429,26 +1466,26 @@ _perm_error_handler(cmd_giveawayreroll)
 #  TICKETS
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="ticketopen", description="🎫 Abrir un ticket de soporte")
+@bot.tree.command(name="ticketopen", description="🎫 Open a support ticket")
 async def cmd_ticketopen(interaction: discord.Interaction):
     guild = interaction.guild
     name = f"ticket-{interaction.user.name}".lower()[:90]
     if discord.utils.get(guild.text_channels, name=name):
-        return await _send_error(interaction, "Ya tienes un ticket abierto.")
+        return await _send_error(interaction, "You already have an open ticket.")
     overwrites = {
         guild.default_role: discord.PermissionOverwrite(view_channel=False),
         interaction.user: discord.PermissionOverwrite(view_channel=True, send_messages=True),
         guild.me: discord.PermissionOverwrite(view_channel=True, send_messages=True),
     }
     ch = await guild.create_text_channel(name, overwrites=overwrites)
-    await interaction.response.send_message(embed=_e("Ticket Creado", f"Tu ticket: {ch.mention}"), ephemeral=True)
-    await ch.send(f"{interaction.user.mention}", embed=_e("Ticket de Soporte", "Describe tu problema. Un staff te atenderá pronto."))
+    await interaction.response.send_message(embed=_e("Ticket Created", f"Your ticket: {ch.mention}"), ephemeral=True)
+    await ch.send(f"{interaction.user.mention}", embed=_e("Support Ticket", "Describe your issue. A staff member will assist you shortly."))
 
-@bot.tree.command(name="ticketclose", description="🔒 Cerrar el ticket actual")
+@bot.tree.command(name="ticketclose", description="🔒 Close the current ticket")
 async def cmd_ticketclose(interaction: discord.Interaction):
     if not interaction.channel.name.startswith("ticket-"):
-        return await _send_error(interaction, "Este canal no es un ticket.")
-    await interaction.response.send_message(embed=_e("Cerrando Ticket", "Este ticket se cerrará en 5 segundos..."))
+        return await _send_error(interaction, "This channel is not a ticket.")
+    await interaction.response.send_message(embed=_e("Closing Ticket", "This ticket will close in 5 seconds..."))
     await asyncio.sleep(5)
     await interaction.channel.delete()
 
@@ -1457,111 +1494,111 @@ async def cmd_ticketclose(interaction: discord.Interaction):
 #  ROLES
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="addrole", description="➕ [Admin] Añadir un rol a un usuario")
-@app_commands.describe(usuario="Usuario", rol="Rol a añadir")
+@bot.tree.command(name="addrole", description="➕ [Admin] Add a role to a user")
+@app_commands.describe(user="User", role="Role to add")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_addrole(interaction: discord.Interaction, usuario: discord.Member, rol: discord.Role):
+async def cmd_addrole(interaction: discord.Interaction, user: discord.Member, role: discord.Role):
     try:
-        await usuario.add_roles(rol)
-        await interaction.response.send_message(embed=_e("Rol Añadido", f"{rol.mention} fue añadido a {usuario.mention}."))
+        await user.add_roles(role)
+        await interaction.response.send_message(embed=_e("Role Added", f"{role.mention} was added to {user.mention}."))
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_addrole)
 
-@bot.tree.command(name="removerole", description="➖ [Admin] Quitar un rol a un usuario")
-@app_commands.describe(usuario="Usuario", rol="Rol a quitar")
+@bot.tree.command(name="removerole", description="➖ [Admin] Remove a role from a user")
+@app_commands.describe(user="User", role="Role to remove")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_removerole(interaction: discord.Interaction, usuario: discord.Member, rol: discord.Role):
+async def cmd_removerole(interaction: discord.Interaction, user: discord.Member, role: discord.Role):
     try:
-        await usuario.remove_roles(rol)
-        await interaction.response.send_message(embed=_e("Rol Removido", f"{rol.mention} fue removido de {usuario.mention}."))
+        await user.remove_roles(role)
+        await interaction.response.send_message(embed=_e("Role Removed", f"{role.mention} was removed from {user.mention}."))
     except Exception as ex:
         await _send_error(interaction, f"```\n{str(ex)[:200]}\n```")
 _perm_error_handler(cmd_removerole)
 
-@bot.tree.command(name="autorole", description="🎭 [Admin] Configurar el rol automático para nuevos miembros")
-@app_commands.describe(rol="Rol a asignar automáticamente")
+@bot.tree.command(name="autorole", description="🎭 [Admin] Set the automatic role for new members")
+@app_commands.describe(role="Role to assign automatically")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_autorole(interaction: discord.Interaction, rol: discord.Role):
+async def cmd_autorole(interaction: discord.Interaction, role: discord.Role):
     cfg = get_config(interaction.guild_id)
-    cfg["autorole"] = rol.id
+    cfg["autorole"] = role.id
     save_data("configs", configs_data)
-    await interaction.response.send_message(embed=_e("Autorol Configurado", f"Nuevos miembros recibirán: {rol.mention}"))
+    await interaction.response.send_message(embed=_e("Autorole Set", f"New members will receive: {role.mention}"))
 _perm_error_handler(cmd_autorole)
 
 
 # ══════════════════════════════════════════════════════════════
-#  CONFIGURACIÓN
+#  CONFIGURATION
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="setwelcome", description="👋 [Admin] Configurar el canal de bienvenida")
-@app_commands.describe(canal="Canal de bienvenida")
+@bot.tree.command(name="setwelcome", description="👋 [Admin] Set the welcome channel")
+@app_commands.describe(channel="Welcome channel")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_setwelcome(interaction: discord.Interaction, canal: discord.TextChannel):
+async def cmd_setwelcome(interaction: discord.Interaction, channel: discord.TextChannel):
     cfg = get_config(interaction.guild_id)
-    cfg["welcome_channel"] = canal.id
+    cfg["welcome_channel"] = channel.id
     save_data("configs", configs_data)
-    await interaction.response.send_message(embed=_e("Bienvenida Configurada", f"Canal establecido: {canal.mention}"))
+    await interaction.response.send_message(embed=_e("Welcome Channel Set", f"Channel set to: {channel.mention}"))
 _perm_error_handler(cmd_setwelcome)
 
-@bot.tree.command(name="setlogs", description="📜 [Admin] Configurar el canal de logs")
-@app_commands.describe(canal="Canal de logs")
+@bot.tree.command(name="setlogs", description="📜 [Admin] Set the logs channel")
+@app_commands.describe(channel="Logs channel")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_setlogs(interaction: discord.Interaction, canal: discord.TextChannel):
+async def cmd_setlogs(interaction: discord.Interaction, channel: discord.TextChannel):
     cfg = get_config(interaction.guild_id)
-    cfg["log_channel"] = canal.id
+    cfg["log_channel"] = channel.id
     save_data("configs", configs_data)
-    await interaction.response.send_message(embed=_e("Logs Configurados", f"Canal establecido: {canal.mention}"))
+    await interaction.response.send_message(embed=_e("Logs Channel Set", f"Channel set to: {channel.mention}"))
 _perm_error_handler(cmd_setlogs)
 
-@bot.tree.command(name="setprefix", description="🔤 [Admin] Configurar el prefijo del bot")
-@app_commands.describe(prefijo="Nuevo prefijo")
+@bot.tree.command(name="setprefix", description="🔤 [Admin] Set the bot's prefix")
+@app_commands.describe(prefix="New prefix")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_setprefix(interaction: discord.Interaction, prefijo: str):
+async def cmd_setprefix(interaction: discord.Interaction, prefix: str):
     cfg = get_config(interaction.guild_id)
-    cfg["prefix"] = prefijo
+    cfg["prefix"] = prefix
     save_data("configs", configs_data)
-    await interaction.response.send_message(embed=_e("Prefijo Configurado", f"Nuevo prefijo: `{prefijo}`"))
+    await interaction.response.send_message(embed=_e("Prefix Set", f"New prefix: `{prefix}`"))
 _perm_error_handler(cmd_setprefix)
 
-@bot.tree.command(name="settings", description="⚙️ Ver la configuración actual del servidor")
+@bot.tree.command(name="settings", description="⚙️ View the server's current configuration")
 async def cmd_settings(interaction: discord.Interaction):
     cfg = get_config(interaction.guild_id)
-    e = _e("Configuración del Servidor")
-    e.add_field(name="Canal Bienvenida", value=f"<#{cfg['welcome_channel']}>" if cfg.get("welcome_channel") else "`No configurado`", inline=False)
-    e.add_field(name="Canal Logs", value=f"<#{cfg['log_channel']}>" if cfg.get("log_channel") else "`No configurado`", inline=False)
-    e.add_field(name="Autorol", value=f"<@&{cfg['autorole']}>" if cfg.get("autorole") else "`No configurado`", inline=False)
-    e.add_field(name="Prefijo", value=f"`{cfg.get('prefix', '!')}`", inline=False)
+    e = _e("Server Configuration")
+    e.add_field(name="Welcome Channel", value=f"<#{cfg['welcome_channel']}>" if cfg.get("welcome_channel") else "`Not set`", inline=False)
+    e.add_field(name="Logs Channel", value=f"<#{cfg['log_channel']}>" if cfg.get("log_channel") else "`Not set`", inline=False)
+    e.add_field(name="Autorole", value=f"<@&{cfg['autorole']}>" if cfg.get("autorole") else "`Not set`", inline=False)
+    e.add_field(name="Prefix", value=f"`{cfg.get('prefix', '!')}`", inline=False)
     await interaction.response.send_message(embed=e, ephemeral=True)
 
 
 # ══════════════════════════════════════════════════════════════
-#  INFORMACIÓN DEL BOT
+#  BOT INFORMATION
 # ══════════════════════════════════════════════════════════════
 
-@bot.tree.command(name="botinfo", description="🤖 Información general del bot")
+@bot.tree.command(name="botinfo", description="🤖 General bot information")
 async def cmd_botinfo(interaction: discord.Interaction):
-    e = _e("FMD BOT", "Bot multifuncional con sistema de bypass premium.")
-    e.add_field(name="Servidores", value=f"`{len(bot.guilds)}`", inline=True)
-    e.add_field(name="Latencia", value=f"`{round(bot.latency*1000)}ms`", inline=True)
+    e = _e("FMD BOT", "Multi-purpose bot with a premium bypass system.")
+    e.add_field(name="Servers", value=f"`{len(bot.guilds)}`", inline=True)
+    e.add_field(name="Latency", value=f"`{round(bot.latency*1000)}ms`", inline=True)
     e.add_field(name="Uptime", value=f"`{_uptime()}`", inline=True)
-    e.add_field(name="Comandos", value=f"`{len(bot.tree.get_commands())}`", inline=True)
+    e.add_field(name="Commands", value=f"`{len(bot.tree.get_commands())}`", inline=True)
     await interaction.response.send_message(embed=e)
 
-@bot.tree.command(name="invite", description="🔗 Invita al bot a tu servidor")
+@bot.tree.command(name="invite", description="🔗 Invite the bot to your server")
 async def cmd_invite(interaction: discord.Interaction):
-    await interaction.response.send_message(embed=_e("Invitar al Bot", f"[Haz clic aquí para invitarme]({BOT_INVITE_URL})"))
+    await interaction.response.send_message(embed=_e("Invite the Bot", f"[Click here to invite me]({BOT_INVITE_URL})"))
 
-@bot.tree.command(name="uptime", description="⏱️ Ver el tiempo activo del bot")
+@bot.tree.command(name="uptime", description="⏱️ Check the bot's uptime")
 async def cmd_uptime(interaction: discord.Interaction):
     await interaction.response.send_message(embed=_e("Uptime", f"`{_uptime()}`"))
 
-@bot.tree.command(name="support", description="🆘 Enlace al servidor de soporte")
+@bot.tree.command(name="support", description="🆘 Support server link")
 async def cmd_support(interaction: discord.Interaction):
-    await interaction.response.send_message(embed=_e("Servidor de Soporte", f"[Únete aquí]({SUPPORT_SERVER_URL})"))
+    await interaction.response.send_message(embed=_e("Support Server", f"[Join here]({SUPPORT_SERVER_URL})"))
 
 
-# ── HEALTH SERVER (Para Render) ─────────────────────────────────
+# ── HEALTH SERVER (For Render) ────────────────────────────────
 class _HealthHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         body = f'{{"status":"online","bot":"FMD BOT","uptime":"{_uptime()}"}}'.encode()
@@ -1581,15 +1618,15 @@ class _HealthHandler(BaseHTTPRequestHandler):
 def start_web():
     server = HTTPServer(("0.0.0.0", PORT), _HealthHandler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    logger.info(f"🌐 Servidor de salud corriendo en puerto :{PORT}")
+    logger.info(f"🌐 Health server running on port :{PORT}")
 
-# ── MAIN ──────────────────────────────────────────────────────
+# ── MAIN ─────────────────────────────────────────────────────
 async def main():
     if not DISCORD_TOKEN:
-        logger.error("❌ DISCORD_TOKEN no encontrado en variables de entorno.")
+        logger.error("❌ DISCORD_TOKEN not found in environment variables.")
         return
     start_web()
-    logger.info(f"🚀 Iniciando FMD BOT...")
+    logger.info("🚀 Starting FMD BOT...")
     await bot.start(DISCORD_TOKEN)
 
 if __name__ == "__main__":
