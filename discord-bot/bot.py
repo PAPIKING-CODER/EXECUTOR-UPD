@@ -6,23 +6,27 @@ import random
 import asyncio
 import logging
 import threading
+import io
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from logging.handlers import RotatingFileHandler
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from urllib.parse import quote
+from urllib.parse import quote, unquote
 
 import discord
 from discord import app_commands
 from discord.ui import Button, View, Select, Modal, TextInput
 import requests
+import aiohttp
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
-# ── LOGGING ──────────────────────────────────────────────────────
+# LOGGING
 LOG_FILE = "bot_logs.txt"
 logger = logging.getLogger("FMD_BOT")
 logger.setLevel(logging.INFO)
-_file_handler = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+_file_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
 _fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 _file_handler.setFormatter(_fmt)
 _console_handler = logging.StreamHandler()
@@ -30,67 +34,37 @@ _console_handler.setFormatter(_fmt)
 logger.addHandler(_file_handler)
 logger.addHandler(_console_handler)
 
-# ── CONFIGURATION ────────────────────────────────────────────────
-DISCORD_TOKEN      = os.environ.get("DISCORD_TOKEN", "")
-PORT               = int(os.environ.get("PORT", "8080"))
+# ==================== CONFIG ====================
+TOKEN = os.environ.get("DISCORD_TOKEN", "")
+OWNER_ID = int(os.environ.get("OWNER_ID", "0") or "0")
+PORT = int(os.environ.get("PORT", "10000"))
+BOT_NAME = "FMD BOT"
+BOT_CREDIT = "KING"
 SUPPORT_SERVER_URL = os.environ.get("SUPPORT_SERVER_URL", "https://discord.gg/nU9MNnByHH")
-BOT_INVITE_URL     = os.environ.get("BOT_INVITE_URL", "https://discord.com/oauth2/authorize?client_id=1525040833814855710")
+BOT_INVITE_URL = os.environ.get("BOT_INVITE_URL", "https://discord.com/oauth2/authorize?client_id=1525040833814855710")
 
+# ==================== OPENROUTER CONFIG ====================
+OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "openai/gpt-3.5-turbo")
+
+# ==================== BYPASS ENGINE ====================
 BYPASS_API_ENDPOINT = "https://4pi-bypass.vercel.app/api/bypass?url="
 AUTOBYPASS_FILE = "autobypass_channels.json"
 
-# ── CUSTOM EMOJIS (FMD BOT DESIGN) ──────────────────────────────
-EMOJI_GREEN_DOT = "<a:greendot:1526742445323190272>"
-EMOJI_LOADER    = "<a:loader:1526741970226253834>"
-EMOJI_CROWN     = "<a:greencrown:1526742765311098980>"
-EMOJI_KEY       = "<:gold_key:1526743159038803978>"
-EMOJI_CLOCK     = "<:clock:1525380296852377711>"
-EMOJI_SUCCESS   = "<:success:1526742163050991616>"
-EMOJI_COPY      = "<:copy_text:1526743644894138479>"
-EMOJI_DISCORD   = "<:discord:1526743527642501273>"
-EMOJI_INVITE    = "<:voice_invite:1526743390488756236>"
-EMOJI_WARNING   = "<:Warningicon:1526855124134137856>"
-EMOJI_FAILED    = "<:failed:1526857565156147250>"
-EMOJI_TICKET    = "<:ticket:1526851476280836256>"
-EMOJI_GIVEAWAY  = "<a:giveaway:1526817132501798983>"
-EMOJI_GIFT      = "<a:gift:1526817190660280360>"
-EMOJI_MONEY     = "<:Money:1526852670743380031>"
-EMOJI_ROCKET    = "<:rocket:1527233455451017337>"
-EMOJI_ADMIN     = "<:Admin:1526850858271248384>"
-EMOJI_OWNER     = "<:Owner:1526850915418509362>"
-EMOJI_MEMBER    = "<:Member:1526851357330505822>"
-EMOJI_LOCK      = "<:lock:1527233626175963236>"
-EMOJI_UNLOCK    = "<:unlock:1527233852215656450>"
-EMOJI_EDIT      = "<:edit:1527235794438328372>"
-EMOJI_DELETE    = "<:Trash_1:1527235528205009020>"
-EMOJI_HOME      = "<:Home:1527235583460773909>"
-EMOJI_LINK      = "<:Link:1525379856034959422>"
-EMOJI_PC        = "<:pc:1516371549471506435>"
-EMOJI_ARROW     = "<a:Arrow:1401389285042684035>"
-EMOJI_INFORMATION = "<:Information:1526852173852315799>"
-EMOJI_DOCUMENT  = "<:document:1527231734880538724>"
+def bypass_url_vps(url: str) -> tuple:
+    try:
+        resp = requests.get(BYPASS_API_ENDPOINT + quote(url, safe=""), timeout=30)
+        if resp.status_code != 200:
+            return None, f"HTTP {resp.status_code}"
+        data = resp.json()
+        if data.get("success") is False:
+            return None, data.get("error", "API error")
+        result = data.get("result") or data.get("url") or data.get("bypassed_url")
+        return result, None
+    except Exception as e:
+        return None, str(e)
 
-# ── COLORS ───────────────────────────────────────────────────────
-C_GREEN = 0x00FF66
-C_WARN  = 0xFFA500
-C_ERROR = 0xED4245
-C_GOLD  = 0xFACC15
-C_BLUE  = 0x3B82F6
-C_RED   = 0xEF4444
-C_INFO  = 0x5865F2
-C_PURPLE= 0x8B5CF6
-
-# ── HELPERS ──────────────────────────────────────────────────────
-_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+")
-BOT_START_TIME = datetime.now(timezone.utc)
-AUTOBYPASS_CHANNELS_FILE = "autobypass_channels.json"
-ECONOMY_FILE = "economy.json"
-LEVELS_FILE = "levels.json"
-WARNINGS_FILE = "warnings.json"
-GIVEAWAYS_FILE = "giveaways.json"
-TICKETS_FILE = "tickets.json"
-IA_CONFIG_FILE = "ia_config.json"
-
+# ==================== JSON HELPERS ====================
 def load_json(path, default):
     if os.path.exists(path):
         try:
@@ -107,178 +81,144 @@ def save_json(path, data):
     except Exception as e:
         logger.warning(f"Could not save {path}: {e}")
 
+# ==================== STORAGE FILES ====================
+TICKETS_FILE = "tickets.json"
+GIVEAWAYS_FILE = "giveaways.json"
+ECONOMY_FILE = "economy.json"
+LEVELS_FILE = "levels.json"
+IA_CONFIG_FILE = "ia_config.json"
+SERVER_CONFIG_FILE = "server_config.json"
+WARNINGS_FILE = "warnings.json"
+
+# ==================== INIT DATA ====================
+autobypass_channels = set(load_json(AUTOBYPASS_FILE, []))
+ia_config = load_json(IA_CONFIG_FILE, {})
+server_config = load_json(SERVER_CONFIG_FILE, {})
+tickets = load_json(TICKETS_FILE, {})
+giveaways = load_json(GIVEAWAYS_FILE, {})
+economy = load_json(ECONOMY_FILE, {})
+levels = load_json(LEVELS_FILE, {})
+warnings = load_json(WARNINGS_FILE, {})
+
+def save_autobypass(): save_json(AUTOBYPASS_FILE, list(autobypass_channels))
+def save_ia_config(): save_json(IA_CONFIG_FILE, ia_config)
+def save_server_config(): save_json(SERVER_CONFIG_FILE, server_config)
+def save_tickets(): save_json(TICKETS_FILE, tickets)
+def save_giveaways(): save_json(GIVEAWAYS_FILE, giveaways)
+def save_economy(): save_json(ECONOMY_FILE, economy)
+def save_levels(): save_json(LEVELS_FILE, levels)
+def save_warnings(): save_json(WARNINGS_FILE, warnings)
+
+# ==================== CUSTOM EMOJIS ====================
+# Use raw strings; if the emoji doesn't exist, fallback to Unicode.
+EMOJI_GREEN_DOT = "<a:GreenDot:1526742445323190272>" if discord.utils.get(1526742445323190272) else "🟢"
+EMOJI_LOADER = "<a:loader:1526741970226253834>" if discord.utils.get(1526741970226253834) else "⏳"
+EMOJI_CROWN = "<a:GreenCrown:1526742765311098980>" if discord.utils.get(1526742765311098980) else "👑"
+EMOJI_KEY = "<:gold_key:1526743159038803978>" if discord.utils.get(1526743159038803978) else "🔑"
+EMOJI_CLOCK = "<:clock:1525380296852377711>" if discord.utils.get(1525380296852377711) else "⏱️"
+EMOJI_SUCCESS = "<:success:1526742163050991616>" if discord.utils.get(1526742163050991616) else "✅"
+EMOJI_FAILED = "<:failed:1526857565156147250>" if discord.utils.get(1526857565156147250) else "❌"
+EMOJI_WARNING = "<:Warningicon:1526855124134137856>" if discord.utils.get(1526855124134137856) else "⚠️"
+EMOJI_COPY = "<:copy_text:1526743644894138479>" if discord.utils.get(1526743644894138479) else "📋"
+EMOJI_DISCORD = "<:Discord:1526743527642501273>" if discord.utils.get(1526743527642501273) else "💬"
+EMOJI_INVITE = "<:voice_invite:1526743390488756236>" if discord.utils.get(1526743390488756236) else "📩"
+EMOJI_LIGHTNING_GREEN = "<:LightningGreen:1525379640498065538>" if discord.utils.get(1525379640498065538) else "⚡"
+EMOJI_LOCK = "<:lock:1527233626175963236>" if discord.utils.get(1527233626175963236) else "🔒"
+EMOJI_UNLOCK = "<:unlock:1527233852215656450>" if discord.utils.get(1527233852215656450) else "🔓"
+EMOJI_EDIT = "<:edit:1527235794438328372>" if discord.utils.get(1527235794438328372) else "✏️"
+EMOJI_DELETE = "<:Trash_1:1527235528205009020>" if discord.utils.get(1527235528205009020) else "🗑️"
+EMOJI_TICKET = "<:ticket:1526851476280836256>" if discord.utils.get(1526851476280836256) else "🎫"
+EMOJI_INFORMATION = "<:Information:1526852173852315799>" if discord.utils.get(1526852173852315799) else "ℹ️"
+EMOJI_LINK = "<:Link:1525379856034959422>" if discord.utils.get(1525379856034959422) else "🔗"
+EMOJI_PC = "<:emojigg_PC:1526858555544572035>" if discord.utils.get(1526858555544572035) else "🖥️"
+EMOJI_HOUSE = "<:House:1526854349110640690>" if discord.utils.get(1526854349110640690) else "🏠"
+EMOJI_SEARCH = "<:Search:1526854204218671155>" if discord.utils.get(1526854204218671155) else "🔍"
+EMOJI_SETTINGS = "<:settings:1526853210231410810>" if discord.utils.get(1526853210231410810) else "⚙️"
+EMOJI_ARROW = "<a:Arrow:1401389285042684035>" if discord.utils.get(1401389285042684035) else "➡️"
+EMOJI_ROLE = "<:Role:1526853667502948443>" if discord.utils.get(1526853667502948443) else "🎭"
+EMOJI_MONEY = "<:Money:1526852670743380031>" if discord.utils.get(1526852670743380031) else "💰"
+EMOJI_BITCASH = "<:BitCash:1526850558726508564>" if discord.utils.get(1526850558726508564) else "💵"
+EMOJI_CART = "<:Cart:1526854833125195786>" if discord.utils.get(1526854833125195786) else "🛒"
+EMOJI_ROCKET = "<:rocket:1527233455451017337>" if discord.utils.get(1527233455451017337) else "🚀"
+EMOJI_HOME = "<:Home:1527235583460773909>" if discord.utils.get(1527235583460773909) else "🏠"
+EMOJI_AVISO = "<:aviso:1399216286353064028>" if discord.utils.get(1399216286353064028) else "⚠️"
+EMOJI_DOCUMENT = "<:document:1527231734880538724>" if discord.utils.get(1527231734880538724) else "📄"
+EMOJI_OWNER = "<:Owner:1526850915418509362>" if discord.utils.get(1526850915418509362) else "👑"
+EMOJI_ADMIN = "<:Admin:1526850858271248384>" if discord.utils.get(1526850858271248384) else "🛡️"
+EMOJI_MEMBER = "<:Member:1526851357330505822>" if discord.utils.get(1526851357330505822) else "👤"
+EMOJI_MOD = "<:emojigg_Mod:1526851052933222420>" if discord.utils.get(1526851052933222420) else "🛡️"
+EMOJI_ADD = "<:add_symbol:1527235736116527179>" if discord.utils.get(1527235736116527179) else "➕"
+EMOJI_GIVEAWAY = "<a:Giveaway:1526817132501798983>" if discord.utils.get(1526817132501798983) else "🎉"
+EMOJI_GIFT = "<a:Gift:1526817190660280360>" if discord.utils.get(1526817190660280360) else "🎁"
+
+# ==================== COLORS ====================
+C_SUCCESS = 0x57F287
+C_ERROR = 0xED4245
+C_WARN = 0xFEE75C
+C_MOD = 0xEB459E
+C_FUN = 0xFF7043
+C_INFO = 0x5865F2
+C_AUTO = 0x9B59B6
+C_GREEN = 0x57F287
+C_GOLD = 0xFACC15
+C_BLUE = 0x3B82F6
+C_RED = 0xEF4444
+C_ORANGE = 0xF59E0B
+C_PURPLE = 0x8B5CF6
+C_DARK_BLUE = 0x2563EB
+C_TICKET = 0x3B82F6
+
+# ==================== HELPERS ====================
+def _footer(extra: str = "") -> str:
+    base = f"👑 CREATED BY {BOT_CREDIT}"
+    return f"{base} • {extra}" if extra else base
+
 def _is_valid_url(url: str) -> bool:
     return bool(re.match(r"^https?://[^\s<>\"']{4,}", url))
 
-def _footer() -> str:
-    return "Made with ❤️ by KING • FMD BOT"
-
-def _uptime() -> str:
-    d = datetime.now(timezone.utc) - BOT_START_TIME
-    total = int(d.total_seconds())
-    h, r = divmod(total, 3600)
-    m, s = divmod(r, 60)
-    return f"{h}h {m}m {s}s"
+def format_uptime(start_time: datetime) -> str:
+    delta = datetime.now(timezone.utc) - start_time
+    total = int(delta.total_seconds())
+    days, rem = divmod(total, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, secs = divmod(rem, 60)
+    parts = []
+    if days: parts.append(f"{days}d")
+    if hours: parts.append(f"{hours}h")
+    if minutes: parts.append(f"{minutes}m")
+    parts.append(f"{secs}s")
+    return " ".join(parts)
 
 def xp_needed(level: int) -> int:
     return 5 * (level + 1) ** 2
 
-async def _delete_after(msg: discord.Message, delay: int):
-    await asyncio.sleep(delay)
-    try:
-        await msg.delete()
-    except:
-        pass
+_URL_PATTERN = re.compile(r"https?://[^\s<>\"']+")
 
-# ── BYPASS ENGINE ────────────────────────────────────────────────
-_http_session = requests.Session()
-_http_session.headers.update({"User-Agent": "FMD-Bot/1.0"})
-
-_BYPASS_RESULT_KEYS = (
-    "content", "result", "loadstring", "bypassed", "bypassed_link",
-    "bypassed_url", "final_url", "destination", "url", "link", "key", "output"
-)
-
-def _extract_bypass_result(data):
-    if isinstance(data, dict):
-        for key in _BYPASS_RESULT_KEYS:
-            if key in data:
-                value = data[key]
-                if isinstance(value, str) and value.strip():
-                    return value.strip()
-                if isinstance(value, (dict, list)):
-                    nested = _extract_bypass_result(value)
-                    if nested: return nested
-        for value in data.values():
-            if isinstance(value, (dict, list)):
-                nested = _extract_bypass_result(value)
-                if nested: return nested
-    elif isinstance(data, list):
-        for item in data:
-            nested = _extract_bypass_result(item)
-            if nested: return nested
-    return None
-
-def bypass_url_vps(url: str):
-    for attempt in range(1, 4):
-        try:
-            resp = _http_session.get(BYPASS_API_ENDPOINT + quote(url, safe=""), timeout=45)
-            if resp.status_code != 200:
-                if attempt < 3:
-                    time.sleep(2)
-                    continue
-                return None, f"HTTP {resp.status_code}"
-            try:
-                data = resp.json()
-            except Exception:
-                txt = resp.text.strip()
-                if txt.startswith("http"):
-                    return txt, None
-                if attempt < 3:
-                    time.sleep(2)
-                    continue
-                return None, "Invalid API response"
-            api_says_error = False
-            if isinstance(data, dict):
-                if data.get("success") is False or data.get("error") or str(data.get("status", "")).lower() == "error":
-                    api_says_error = True
-            result = _extract_bypass_result(data)
-            if result and not api_says_error:
-                return str(result), None
-            if api_says_error:
-                err_msg = data.get("message") or data.get("error") if isinstance(data, dict) else None
-                last_error = str(err_msg or "API reported an error.")
-                if attempt < 3:
-                    time.sleep(2)
-                    continue
-                return None, last_error
-            return None, "No result found in API."
-        except requests.exceptions.Timeout:
-            if attempt < 3:
-                time.sleep(2)
-        except Exception as e:
-            if attempt < 3:
-                time.sleep(2)
-    return None, "Request timed out after retries."
-
-# ── BYPASS EMBEDS ────────────────────────────────────────────────
-def embed_loading() -> discord.Embed:
-    e = discord.Embed(color=C_WARN, timestamp=datetime.now(timezone.utc))
-    e.title = f"{EMOJI_LOADER} Generating Bypass..."
-    e.description = "Please wait..."
-    e.set_footer(text=_footer())
-    return e
-
-def embed_success(result: str, elapsed: float) -> discord.Embed:
-    e = discord.Embed(color=C_GREEN, timestamp=datetime.now(timezone.utc))
-    e.title = f"{EMOJI_GREEN_DOT} Bypass Completed"
-    e.add_field(
-        name=f"{EMOJI_KEY} Result",
-        value=f"```txt\n{result[:1000]}\n```",
-        inline=False
-    )
-    e.add_field(
-        name=f"{EMOJI_CLOCK} Duration",
-        value=f"`{elapsed:.2f}s`",
-        inline=True
-    )
-    e.add_field(
-        name=f"{EMOJI_SUCCESS} Status",
-        value="Successfully Generated",
-        inline=True
-    )
-    e.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526742765311098980.gif")  # Green Crown
-    e.set_footer(text=_footer())
-    return e
-
-def embed_fail(error: str, elapsed: float) -> discord.Embed:
-    e = discord.Embed(color=C_ERROR, timestamp=datetime.now(timezone.utc))
-    e.title = f"{EMOJI_GREEN_DOT} Bypass Failed"
-    e.description = f"```\n{error or 'Unknown error'}\n```"
-    e.add_field(
-        name=f"{EMOJI_CLOCK} Duration",
-        value=f"`{elapsed:.2f}s`",
-        inline=True
-    )
-    e.set_footer(text=_footer())
-    return e
-
-# ── BYPASS VIEW ──────────────────────────────────────────────────
-class FmdBypassView(View):
-    def __init__(self, result: str):
-        super().__init__(timeout=None)
-        self._result = result
-        self.add_item(Button(label="Discord", emoji=EMOJI_DISCORD, url=SUPPORT_SERVER_URL, style=discord.ButtonStyle.link, row=0))
-        self.add_item(Button(label="Invite", emoji=EMOJI_INVITE, url=BOT_INVITE_URL, style=discord.ButtonStyle.link, row=0))
-
-    @discord.ui.button(label="Copy", emoji=EMOJI_COPY, style=discord.ButtonStyle.secondary, row=0)
-    async def copy_button(self, interaction: discord.Interaction, button: Button):
-        await interaction.response.send_message(
-            f"```txt\n{self._result[:1900]}\n```",
-            ephemeral=True
-        )
-
-# ── HEALTH SERVER ────────────────────────────────────────────────
+# ==================== HEALTH SERVER (Render) ====================
 class _HealthHandler(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
     def do_GET(self):
-        body = f'{{"status":"online","bot":"FMD BOT","uptime":"{_uptime()}"}}'.encode()
+        self._send_health_response()
+    def do_HEAD(self):
+        self._send_health_response()
+    def _send_health_response(self):
+        body = b'{"status":"ok","bot":"FMD BOT"}'
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Connection", "close")
         self.end_headers()
-        self.wfile.write(body)
-    def do_HEAD(self):
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-    def log_message(self, *_): pass
+        if self.command != "HEAD":
+            self.wfile.write(body)
+    def log_message(self, format, *args):
+        pass
 
-def start_web():
+def _start_health_server():
     server = HTTPServer(("0.0.0.0", PORT), _HealthHandler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
     logger.info(f"Health server running on port {PORT}")
+    server.serve_forever()
 
-# ── BOT CLIENT ────────────────────────────────────────────────────
+# ==================== BOT CLIENT ====================
 class FmdBot(discord.Client):
     def __init__(self):
         intents = discord.Intents.default()
@@ -286,15 +226,17 @@ class FmdBot(discord.Client):
         intents.members = True
         super().__init__(intents=intents)
         self.tree = app_commands.CommandTree(self)
+        self.BOT_START_TIME = datetime.now(timezone.utc)
 
     async def setup_hook(self):
         await self.tree.sync()
         logger.info("Commands synced successfully!")
+        self.loop.create_task(self._giveaway_loop())
 
     async def on_ready(self):
         logger.info(f"Logged in as {self.user} ({self.user.id})")
         logger.info(f"Serving {len(self.guilds)} servers")
-        await self.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/bypass"))
+        await self.change_presence(activity=discord.Activity(type=discord.ActivityType.listening, name="/help"))
 
     async def on_message(self, message: discord.Message):
         if message.author.bot or not message.guild:
@@ -309,50 +251,132 @@ class FmdBot(discord.Client):
             urls = _URL_PATTERN.findall(message.content)
             if urls:
                 await self._auto_bypass(message, urls)
+            return
 
-        # XP system
-        if not message.author.bot:
-            guild_id = str(message.guild.id)
-            user_id = str(message.author.id)
-            levels = load_json(LEVELS_FILE, {})
-            levels.setdefault(guild_id, {}).setdefault(user_id, {"xp": 0, "level": 0})
-            entry = levels[guild_id][user_id]
-            entry["xp"] += random.randint(5, 15)
-            if entry["xp"] >= xp_needed(entry["level"]):
-                entry["level"] += 1
-                entry["xp"] = 0
-                try:
-                    msg = await message.channel.send(f"{EMOJI_ROCKET} {message.author.mention} leveled up to **Level {entry['level']}**!")
-                    # Auto-delete after 5 seconds
-                    asyncio.create_task(_delete_after(msg, 5))
-                except:
-                    pass
-                save_json(LEVELS_FILE, levels)
+        # IA auto-reply
+        if str(message.channel.id) in ia_config.get("channels", []):
+            await self._handle_ia_message(message)
+
+        # XP / Level system
+        guild_id = str(message.guild.id)
+        user_id = str(message.author.id)
+        levels.setdefault(guild_id, {}).setdefault(user_id, {"xp": 0, "level": 0})
+        entry = levels[guild_id][user_id]
+        entry["xp"] += random.randint(5, 15)
+        if entry["xp"] >= xp_needed(entry["level"]):
+            entry["level"] += 1
+            entry["xp"] = 0
+            try:
+                msg = await message.channel.send(f"{EMOJI_ROCKET} {message.author.mention} leveled up to **Level {entry['level']}**!")
+                # Auto-delete level-up message after 5 seconds
+                asyncio.create_task(self._delete_after(msg, 5))
+            except:
+                pass
+            save_levels()
+
+    async def _delete_after(self, msg: discord.Message, delay: int):
+        await asyncio.sleep(delay)
+        try:
+            await msg.delete()
+        except:
+            pass
 
     async def _auto_bypass(self, message: discord.Message, urls: list):
-        loop = asyncio.get_running_loop()
         for url in urls[:1]:
             if not _is_valid_url(url):
                 continue
-            try:
-                status_msg = await message.channel.send(content=message.author.mention, embed=embed_loading())
-            except:
-                continue
-            t0 = time.time()
-            result, error = await loop.run_in_executor(None, bypass_url_vps, url)
-            elapsed = time.time() - t0
-            try:
-                if result:
-                    embed = embed_success(result, elapsed)
-                    view = FmdBypassView(result)
-                    msg = await status_msg.edit(content=message.author.mention, embed=embed, view=view)
-                    asyncio.create_task(_delete_after(msg, 120))
-                else:
-                    embed = embed_fail(error, elapsed)
-                    msg = await status_msg.edit(content=message.author.mention, embed=embed)
-                    asyncio.create_task(_delete_after(msg, 120))
-            except:
-                pass
+            start = time.time()
+            result, error = await asyncio.get_running_loop().run_in_executor(None, bypass_url_vps, url)
+            elapsed = time.time() - start
+            if result:
+                embed = discord.Embed(color=C_GREEN)
+                embed.title = f"{EMOJI_GREEN_DOT} BYPASS SUCCESS"
+                embed.add_field(
+                    name=f"{EMOJI_KEY} Result",
+                    value=f"```txt\n{result[:1000]}\n```",
+                    inline=False
+                )
+                embed.add_field(
+                    name=f"{EMOJI_CLOCK} Time",
+                    value=f"`{elapsed:.2f}s`",
+                    inline=True
+                )
+                embed.add_field(
+                    name=f"{EMOJI_SUCCESS} Status",
+                    value="`Completed`",
+                    inline=True
+                )
+                embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526742765311098980.gif")  # GreenCrown
+                embed.set_footer(text=_footer())
+                view = View()
+                view.add_item(Button(label="📋 Copy", style=discord.ButtonStyle.secondary, custom_id="bypass_copy"))
+                msg = await message.channel.send(content=message.author.mention, embed=embed, view=view)
+                asyncio.create_task(self._delete_after(msg, 120))
+            else:
+                embed = discord.Embed(
+                    title=f"{EMOJI_FAILED} BYPASS FAILED",
+                    description=f"```{error or 'Unknown error'}```",
+                    color=C_ERROR
+                )
+                embed.set_footer(text=_footer())
+                await message.channel.send(content=message.author.mention, embed=embed)
+
+    async def _handle_ia_message(self, message: discord.Message):
+        if not OPENROUTER_API_KEY:
+            return
+        try:
+            async with aiohttp.ClientSession() as session:
+                headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+                payload = {"model": OPENROUTER_MODEL, "messages": [{"role": "user", "content": message.content}], "max_tokens": 500}
+                async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=10) as resp:
+                    if resp.status == 200:
+                        data = await resp.json()
+                        reply = data["choices"][0]["message"]["content"]
+                        embed = discord.Embed(description=reply, color=C_INFO)
+                        embed.set_author(name="🤖 AI Assistant")
+                        await message.reply(embed=embed)
+                    else:
+                        await message.reply("⚠️ AI service error.")
+        except Exception as e:
+            logger.error(f"IA error: {e}")
+
+    async def _giveaway_loop(self):
+        await self.wait_until_ready()
+        while not self.is_closed():
+            now = time.time()
+            to_end = []
+            for gid, g in giveaways.items():
+                if not g.get("ended") and not g.get("paused") and g["end_time"] <= now:
+                    to_end.append(gid)
+            for gid in to_end:
+                await self._end_giveaway(gid)
+            await asyncio.sleep(5)
+
+    async def _end_giveaway(self, gid: str):
+        g = giveaways.get(gid)
+        if not g or g.get("ended"):
+            return
+        g["ended"] = True
+        participants = g.get("participants", [])
+        channel = self.get_channel(g["channel"])
+        if not channel:
+            save_giveaways()
+            return
+        try:
+            msg = await channel.fetch_message(int(gid))
+            if not participants:
+                embed = discord.Embed(title="🎊 Giveaway Ended", description="No valid participants.", color=C_ERROR)
+                await msg.edit(embed=embed, view=None)
+            else:
+                winners = random.sample(participants, min(g["winners"], len(participants)))
+                mentions = " ".join([f"<@{w}>" for w in winners])
+                embed = discord.Embed(title="🎊 Giveaway Ended", color=C_GOLD)
+                embed.description = f"**Prize:** {g['prize']}\n🏆 **Winner(s):** {mentions}"
+                await msg.edit(embed=embed, view=None)
+                await channel.send(f"🎉 Congratulations {mentions}! You won **{g['prize']}**!")
+        except:
+            pass
+        save_giveaways()
 
 bot = FmdBot()
 tree = bot.tree
@@ -371,51 +395,90 @@ async def on_app_command_error(interaction: discord.Interaction, error: app_comm
 
 # ==================== BYPASS COMMANDS ====================
 @tree.command(name="bypass", description="Bypass a link manually")
-async def cmd_bypass(interaction: discord.Interaction, url: str):
+async def bypass_cmd(interaction: discord.Interaction, url: str):
     if not _is_valid_url(url):
-        e = discord.Embed(description=f"{EMOJI_WARNING} Invalid URL.", color=C_WARN)
-        e.set_footer(text=_footer())
-        return await interaction.response.send_message(embed=e, ephemeral=True)
-
-    await interaction.response.send_message(embed=embed_loading())
-
-    t0 = time.time()
+        return await interaction.response.send_message(f"{EMOJI_WARNING} Invalid URL.", ephemeral=True)
+    await interaction.response.defer()
+    start = time.time()
     result, error = await asyncio.get_running_loop().run_in_executor(None, bypass_url_vps, url)
-    elapsed = time.time() - t0
-
-    try:
-        if result:
-            embed = embed_success(result, elapsed)
-            view = FmdBypassView(result)
-            msg = await interaction.edit_original_response(embed=embed, view=view)
-            asyncio.create_task(_delete_after(msg, 120))
-        else:
-            embed = embed_fail(error, elapsed)
-            msg = await interaction.edit_original_response(embed=embed)
-            asyncio.create_task(_delete_after(msg, 120))
-    except Exception as e:
-        logger.error(f"Error editing response: {e}")
+    elapsed = time.time() - start
+    if result:
+        embed = discord.Embed(color=C_GREEN)
+        embed.title = f"{EMOJI_GREEN_DOT} BYPASS SUCCESS"
+        embed.add_field(
+            name=f"{EMOJI_KEY} Result",
+            value=f"```txt\n{result[:1000]}\n```",
+            inline=False
+        )
+        embed.add_field(
+            name=f"{EMOJI_CLOCK} Time",
+            value=f"`{elapsed:.2f}s`",
+            inline=True
+        )
+        embed.add_field(
+            name=f"{EMOJI_SUCCESS} Status",
+            value="`Completed`",
+            inline=True
+        )
+        embed.set_thumbnail(url="https://cdn.discordapp.com/emojis/1526742765311098980.gif")
+        embed.set_footer(text=_footer())
+        view = View()
+        view.add_item(Button(label="📋 Copy", style=discord.ButtonStyle.secondary, custom_id="bypass_copy"))
+        await interaction.followup.send(embed=embed, view=view)
+    else:
+        embed = discord.Embed(
+            title=f"{EMOJI_FAILED} BYPASS FAILED",
+            description=f"```{error or 'Unknown error'}```",
+            color=C_ERROR
+        )
+        embed.set_footer(text=_footer())
+        await interaction.followup.send(embed=embed)
 
 @tree.command(name="setautobypass", description="[Admin] Toggle auto-bypass in this channel")
 @app_commands.checks.has_permissions(administrator=True)
-async def cmd_setautobypass(interaction: discord.Interaction):
+async def setautobypass_cmd(interaction: discord.Interaction):
     cid = interaction.channel_id
-    autobypass_channels = load_json(AUTOBYPASS_CHANNELS_FILE, set())
     if cid in autobypass_channels:
         autobypass_channels.discard(cid)
-        save_json(AUTOBYPASS_CHANNELS_FILE, list(autobypass_channels))
+        save_autobypass()
         embed = discord.Embed(
-            title="Auto-Bypass Disabled",
+            title=f"{EMOJI_WARNING} Auto-Bypass Disabled",
             color=C_ERROR
         )
     else:
         autobypass_channels.add(cid)
-        save_json(AUTOBYPASS_CHANNELS_FILE, list(autobypass_channels))
+        save_autobypass()
         embed = discord.Embed(
-            title=f"{EMOJI_GREEN_DOT} Auto-Bypass Enabled",
-            color=C_GREEN
+            title=f"{EMOJI_LIGHTNING_GREEN} Auto-Bypass Enabled",
+            color=C_SUCCESS
         )
         embed.description = f"Every message in {interaction.channel.mention} will be deleted; links will be auto-bypassed."
+    embed.set_footer(text=_footer())
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+# ==================== IA COMMANDS ====================
+@tree.command(name="setupia", description="[Admin] Toggle AI auto-reply in this channel")
+@app_commands.checks.has_permissions(administrator=True)
+async def setupia_cmd(interaction: discord.Interaction):
+    cid = str(interaction.channel_id)
+    channels = ia_config.get("channels", [])
+    if cid in channels:
+        channels.remove(cid)
+        ia_config["channels"] = channels
+        save_ia_config()
+        embed = discord.Embed(
+            title=f"{EMOJI_WARNING} AI Disabled",
+            color=C_ERROR
+        )
+    else:
+        channels.append(cid)
+        ia_config["channels"] = channels
+        save_ia_config()
+        embed = discord.Embed(
+            title=f"{EMOJI_GREEN_DOT} AI Enabled",
+            color=C_SUCCESS
+        )
+    embed.description = f"{interaction.channel.mention} will auto-reply with OpenRouter."
     embed.set_footer(text=_footer())
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
@@ -431,10 +494,12 @@ async def setup_ticket_cmd(interaction: discord.Interaction):
     embed = discord.Embed(
         title=f"{EMOJI_TICKET} Support Center",
         description="Need help? Click the button below to create a ticket.",
-        color=C_BLUE
+        color=C_TICKET
     )
     embed.set_footer(text=_footer())
     await interaction.response.send_message(embed=embed, view=TicketPanelView())
+    server_config["ticket_channel"] = interaction.channel.id
+    save_server_config()
 
 class TicketCreateModal(Modal):
     def __init__(self):
@@ -458,7 +523,7 @@ class TicketCreateModal(Modal):
             ch = await interaction.guild.create_text_channel(channel_name, overwrites=overwrites, reason="Ticket created")
         except:
             return await interaction.response.send_message(f"{EMOJI_FAILED} Failed to create ticket channel.", ephemeral=True)
-        embed = discord.Embed(title=f"{EMOJI_TICKET} Ticket Created", color=C_BLUE)
+        embed = discord.Embed(title=f"{EMOJI_TICKET} Ticket Created", color=C_TICKET)
         embed.description = "Welcome! Please explain your issue. A staff member will be with you shortly."
         embed.add_field(name="👤 User", value=interaction.user.mention, inline=False)
         embed.add_field(name="📂 Reason", value=self.reason.value, inline=False)
@@ -485,20 +550,22 @@ async def on_interaction(interaction: discord.Interaction):
     custom_id = interaction.data["custom_id"]
     if custom_id == "ticket_create":
         return await interaction.response.send_modal(TicketCreateModal())
+
     if custom_id.startswith("ticket_"):
         if not interaction.channel.name.startswith("ticket-"):
             return await interaction.response.send_message(f"{EMOJI_WARNING} Not a ticket channel.", ephemeral=True)
         if interaction.user.id != interaction.guild.owner_id and not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message(f"{EMOJI_WARNING} Staff only.", ephemeral=True)
+
         if custom_id == "ticket_close":
             await interaction.channel.edit(name=f"closed-{interaction.channel.name[7:]}")
-            embed = discord.Embed(title=f"{EMOJI_LOCK} Ticket Closed", color=C_RED)
+            embed = discord.Embed(title=f"{EMOJI_LOCK} Ticket Closed", color=C_ERROR)
             embed.add_field(name="Closed By", value=interaction.user.mention)
             embed.set_footer(text=_footer())
             await interaction.channel.send(embed=embed)
             await interaction.response.send_message("Ticket closed.", ephemeral=True)
         elif custom_id == "ticket_claim":
-            embed = discord.Embed(title=f"{EMOJI_OWNER} Ticket Claimed", color=C_GREEN)
+            embed = discord.Embed(title=f"{EMOJI_OWNER} Ticket Claimed", color=C_SUCCESS)
             embed.add_field(name="Staff", value=interaction.user.mention)
             await interaction.channel.send(embed=embed)
             await interaction.response.send_message("Claimed.", ephemeral=True)
@@ -556,7 +623,7 @@ async def close_ticket_cmd(interaction: discord.Interaction):
     if not interaction.channel.name.startswith("ticket-"):
         return await interaction.response.send_message(f"{EMOJI_WARNING} Not a ticket channel.", ephemeral=True)
     await interaction.channel.edit(name=f"closed-{interaction.channel.name[7:]}")
-    embed = discord.Embed(title=f"{EMOJI_LOCK} Ticket Closed", color=C_RED)
+    embed = discord.Embed(title=f"{EMOJI_LOCK} Ticket Closed", color=C_ERROR)
     embed.add_field(name="Closed By", value=interaction.user.mention)
     await interaction.channel.send(embed=embed)
     await interaction.response.send_message("Ticket closed.", ephemeral=True)
@@ -588,6 +655,29 @@ async def transcript_ticket_cmd(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed, file=file, ephemeral=True)
 
 # ==================== GIVEAWAY COMMANDS ====================
+class GiveawayView(discord.ui.View):
+    def __init__(self, gid):
+        super().__init__(timeout=None)
+        self.gid = gid
+        self.add_item(Button(label="🎉 Join", style=discord.ButtonStyle.success, custom_id=f"give_join_{gid}"))
+
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.type != discord.InteractionType.component:
+        return
+    custom_id = interaction.data["custom_id"]
+    if custom_id.startswith("give_join_"):
+        gid = custom_id[9:]
+        g = giveaways.get(gid)
+        if not g or g.get("ended") or g.get("paused"):
+            return await interaction.response.send_message(f"{EMOJI_WARNING} This giveaway is not active.", ephemeral=True)
+        uid = str(interaction.user.id)
+        if uid in g.get("participants", []):
+            return await interaction.response.send_message(f"{EMOJI_WARNING} You already joined.", ephemeral=True)
+        g.setdefault("participants", []).append(uid)
+        save_giveaways()
+        await interaction.response.send_message(f"{EMOJI_SUCCESS} You joined the giveaway!", ephemeral=True)
+
 giveaway_group = app_commands.Group(name="giveaway", description="Giveaway commands")
 
 @giveaway_group.command(name="start", description="Start a new giveaway")
@@ -606,7 +696,10 @@ async def gstart(interaction: discord.Interaction, prize: str, duration: str, wi
     if seconds < 10:
         return await interaction.response.send_message("Minimum duration is 10 seconds.", ephemeral=True)
     end_time = time.time() + seconds
-    embed = discord.Embed(title=f"{EMOJI_GIVEAWAY} Giveaway Started", color=C_GOLD)
+    embed = discord.Embed(
+        title=f"{EMOJI_GIVEAWAY} Giveaway Started",
+        color=C_GOLD
+    )
     embed.add_field(name="🎁 Prize", value=prize, inline=False)
     embed.add_field(name="👑 Host", value=interaction.user.mention, inline=True)
     embed.add_field(name="🏆 Winners", value=str(winners), inline=True)
@@ -615,76 +708,33 @@ async def gstart(interaction: discord.Interaction, prize: str, duration: str, wi
     embed.set_footer(text=_footer())
     msg = await interaction.response.send_message(embed=embed, wait=True)
     gid = str(msg.id)
-    giveaways = load_json(GIVEAWAYS_FILE, {})
-    giveaways[gid] = {"prize": prize, "winners": winners, "end_time": end_time, "host": str(interaction.user.id), "channel": interaction.channel_id, "participants": [], "ended": False}
-    save_json(GIVEAWAYS_FILE, giveaways)
-    view = View()
-    view.add_item(Button(label="🎉 Join", style=discord.ButtonStyle.success, custom_id=f"give_join_{gid}"))
-    await msg.edit(view=view)
-    asyncio.create_task(_giveaway_loop(gid))
-
-async def _giveaway_loop(gid: str):
-    await asyncio.sleep(1)
-    while True:
-        giveaways = load_json(GIVEAWAYS_FILE, {})
-        g = giveaways.get(gid)
-        if not g or g.get("ended"):
-            break
-        if time.time() >= g["end_time"]:
-            await _end_giveaway(gid)
-            break
-        await asyncio.sleep(5)
-
-async def _end_giveaway(gid: str):
-    giveaways = load_json(GIVEAWAYS_FILE, {})
-    g = giveaways.get(gid)
-    if not g or g.get("ended"):
-        return
-    g["ended"] = True
-    participants = g.get("participants", [])
-    channel = bot.get_channel(g["channel"])
-    if channel:
-        try:
-            msg = await channel.fetch_message(int(gid))
-            if not participants:
-                embed = discord.Embed(title="🎊 Giveaway Ended", description="No valid participants.", color=C_ERROR)
-                await msg.edit(embed=embed, view=None)
-            else:
-                winners = random.sample(participants, min(g["winners"], len(participants)))
-                mentions = " ".join([f"<@{w}>" for w in winners])
-                embed = discord.Embed(title="🎊 Giveaway Ended", color=C_GOLD)
-                embed.description = f"**Prize:** {g['prize']}\n🏆 **Winner(s):** {mentions}"
-                await msg.edit(embed=embed, view=None)
-                await channel.send(f"🎉 Congratulations {mentions}! You won **{g['prize']}**!")
-        except:
-            pass
-    save_json(GIVEAWAYS_FILE, giveaways)
+    giveaways[gid] = {"prize": prize, "winners": winners, "end_time": end_time, "host": str(interaction.user.id), "channel": interaction.channel_id, "participants": [], "ended": False, "paused": False}
+    save_giveaways()
+    await msg.edit(view=GiveawayView(gid))
 
 @giveaway_group.command(name="end", description="End a giveaway early")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def gend(interaction: discord.Interaction):
-    giveaways = load_json(GIVEAWAYS_FILE, {})
-    active = [gid for gid, g in giveaways.items() if not g.get("ended") and g.get("channel") == interaction.channel_id]
+    active = [g for gid, g in giveaways.items() if not g.get("ended") and g.get("channel") == interaction.channel_id]
     if not active:
         return await interaction.response.send_message("No active giveaways in this channel.", ephemeral=True)
-    options = [discord.SelectOption(label=giveaways[gid]["prize"][:80], value=gid) for gid in active[:25]]
+    options = [discord.SelectOption(label=g["prize"][:80], value=gid) for gid, g in giveaways.items() if not g.get("ended") and g.get("channel") == interaction.channel_id]
     class Sel(discord.ui.Select):
         async def callback(self, i: discord.Interaction):
             gid = self.values[0]
-            await _end_giveaway(gid)
+            await bot._end_giveaway(gid)
             await i.response.send_message("Giveaway ended.", ephemeral=True)
     view = View()
-    view.add_item(Sel(placeholder="Select giveaway", options=options))
+    view.add_item(Sel(placeholder="Select giveaway", options=options[:25]))
     await interaction.response.send_message("Select which giveaway to end:", view=view, ephemeral=True)
 
 @giveaway_group.command(name="reroll", description="Reroll a giveaway winner")
 @app_commands.checks.has_permissions(manage_guild=True)
 async def greroll(interaction: discord.Interaction):
-    giveaways = load_json(GIVEAWAYS_FILE, {})
-    ended = [gid for gid, g in giveaways.items() if g.get("ended") and g.get("channel") == interaction.channel_id and len(g.get("participants", [])) > 1]
+    ended = [g for gid, g in giveaways.items() if g.get("ended") and g.get("channel") == interaction.channel_id and len(g.get("participants", [])) > 1]
     if not ended:
         return await interaction.response.send_message("No eligible ended giveaways.", ephemeral=True)
-    options = [discord.SelectOption(label=giveaways[gid]["prize"][:80], value=gid) for gid in ended[:25]]
+    options = [discord.SelectOption(label=g["prize"][:80], value=gid) for gid, g in giveaways.items() if g.get("ended") and g.get("channel") == interaction.channel_id and len(g.get("participants", [])) > 1]
     class Sel(discord.ui.Select):
         async def callback(self, i: discord.Interaction):
             gid = self.values[0]
@@ -696,16 +746,18 @@ async def greroll(interaction: discord.Interaction):
             await i.channel.send(f"🎉 New winner: <@{winner}>!")
             await i.response.send_message("Rerolled.", ephemeral=True)
     view = View()
-    view.add_item(Sel(placeholder="Select giveaway", options=options))
+    view.add_item(Sel(placeholder="Select giveaway", options=options[:25]))
     await interaction.response.send_message("Select which giveaway to reroll:", view=view, ephemeral=True)
 
 @giveaway_group.command(name="list", description="List all giveaways")
 async def glist(interaction: discord.Interaction):
-    giveaways = load_json(GIVEAWAYS_FILE, {})
     guild_g = {gid: g for gid, g in giveaways.items() if g.get("channel") == interaction.channel_id}
     if not guild_g:
         return await interaction.response.send_message("No giveaways in this channel.", ephemeral=True)
-    embed = discord.Embed(title=f"{EMOJI_GIVEAWAY} Giveaway List", color=C_INFO)
+    embed = discord.Embed(
+        title=f"{EMOJI_GIVEAWAY} Giveaway List",
+        color=C_INFO
+    )
     active, ended = [], []
     for gid, g in guild_g.items():
         if g.get("ended"):
@@ -726,7 +778,11 @@ async def ban_cmd(interaction: discord.Interaction, member: discord.Member, reas
         return await interaction.response.send_message(f"{EMOJI_WARNING} Cannot ban this user.", ephemeral=True)
     try:
         await member.ban(reason=reason, delete_message_days=0)
-        embed = discord.Embed(title=f"{EMOJI_ADMIN} User Banned", description=f"**{member}** banned.\nReason: {reason}", color=C_RED)
+        embed = discord.Embed(
+            title=f"{EMOJI_ADMIN} User Banned",
+            description=f"**{member}** banned.\nReason: {reason}",
+            color=C_ERROR
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"{EMOJI_FAILED} Error: {e}", ephemeral=True)
@@ -738,7 +794,11 @@ async def kick_cmd(interaction: discord.Interaction, member: discord.Member, rea
         return await interaction.response.send_message(f"{EMOJI_WARNING} Cannot kick this user.", ephemeral=True)
     try:
         await member.kick(reason=reason)
-        embed = discord.Embed(title=f"{EMOJI_ADMIN} User Kicked", description=f"**{member}** kicked.\nReason: {reason}", color=C_ORANGE)
+        embed = discord.Embed(
+            title=f"{EMOJI_ADMIN} User Kicked",
+            description=f"**{member}** kicked.\nReason: {reason}",
+            color=C_ORANGE
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"{EMOJI_FAILED} Error: {e}", ephemeral=True)
@@ -763,7 +823,11 @@ async def timeout_cmd(interaction: discord.Interaction, member: discord.Member, 
     try:
         until = discord.utils.utcnow() + timedelta(seconds=seconds)
         await member.timeout(until, reason=reason)
-        embed = discord.Embed(title=f"{EMOJI_CLOCK} Timeout Applied", description=f"**{member}** timed out for **{duration}**.\nReason: {reason}", color=C_ORANGE)
+        embed = discord.Embed(
+            title=f"{EMOJI_CLOCK} Timeout Applied",
+            description=f"**{member}** timed out for **{duration}**.\nReason: {reason}",
+            color=C_ORANGE
+        )
         await interaction.response.send_message(embed=embed, ephemeral=True)
     except Exception as e:
         await interaction.response.send_message(f"{EMOJI_FAILED} Error: {e}", ephemeral=True)
@@ -772,11 +836,14 @@ async def timeout_cmd(interaction: discord.Interaction, member: discord.Member, 
 @app_commands.checks.has_permissions(kick_members=True)
 async def warn_cmd(interaction: discord.Interaction, member: discord.Member, reason: str = "No reason"):
     gid, uid = str(interaction.guild_id), str(member.id)
-    warnings = load_json(WARNINGS_FILE, {})
     warnings.setdefault(gid, {}).setdefault(uid, []).append({"mod": str(interaction.user.id), "reason": reason, "ts": int(time.time())})
-    save_json(WARNINGS_FILE, warnings)
+    save_warnings()
     count = len(warnings[gid][uid])
-    embed = discord.Embed(title=f"{EMOJI_WARNING} Warning Issued", description=f"**{member}** warned.\nReason: {reason}\nTotal: {count}", color=C_GOLD)
+    embed = discord.Embed(
+        title=f"{EMOJI_WARNING} Warning Issued",
+        description=f"**{member}** warned.\nReason: {reason}\nTotal: {count}",
+        color=C_GOLD
+    )
     await interaction.response.send_message(embed=embed, ephemeral=True)
 
 @tree.command(name="clear", description="[Mod] Clear messages (max 10000)")
@@ -793,7 +860,11 @@ async def clear_cmd(interaction: discord.Interaction, amount: app_commands.Range
         remaining -= len(purged)
         if len(purged) < batch:
             break
-    embed = discord.Embed(title=f"{EMOJI_SUCCESS} Messages Cleared", description=f"Deleted **{deleted}** messages.", color=C_GREEN)
+    embed = discord.Embed(
+        title=f"{EMOJI_SUCCESS} Messages Cleared",
+        description=f"Deleted **{deleted}** messages.",
+        color=C_SUCCESS
+    )
     await interaction.followup.send(embed=embed, ephemeral=True)
 
 @tree.command(name="lock", description="[Mod] Lock the channel")
@@ -802,7 +873,10 @@ async def lock_cmd(interaction: discord.Interaction):
     overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
     overwrite.send_messages = False
     await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
-    embed = discord.Embed(title=f"{EMOJI_LOCK} Channel Locked", color=C_RED)
+    embed = discord.Embed(
+        title=f"{EMOJI_LOCK} Channel Locked",
+        color=C_ERROR
+    )
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="unlock", description="[Mod] Unlock the channel")
@@ -811,7 +885,10 @@ async def unlock_cmd(interaction: discord.Interaction):
     overwrite = interaction.channel.overwrites_for(interaction.guild.default_role)
     overwrite.send_messages = None
     await interaction.channel.set_permissions(interaction.guild.default_role, overwrite=overwrite)
-    embed = discord.Embed(title=f"{EMOJI_UNLOCK} Channel Unlocked", color=C_GREEN)
+    embed = discord.Embed(
+        title=f"{EMOJI_UNLOCK} Channel Unlocked",
+        color=C_SUCCESS
+    )
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="slowmode", description="[Mod] Set slowmode (0 to disable, max 21600s)")
@@ -820,35 +897,53 @@ async def unlock_cmd(interaction: discord.Interaction):
 async def slowmode_cmd(interaction: discord.Interaction, seconds: app_commands.Range[int, 0, 21600]):
     await interaction.channel.edit(slowmode_delay=seconds)
     if seconds == 0:
-        embed = discord.Embed(title=f"{EMOJI_CLOCK} Slowmode Disabled", color=C_GREEN)
+        embed = discord.Embed(
+            title=f"{EMOJI_CLOCK} Slowmode Disabled",
+            color=C_SUCCESS
+        )
     else:
-        embed = discord.Embed(title=f"{EMOJI_CLOCK} Slowmode Set", description=f"Slowmode: {seconds}s", color=C_GOLD)
+        embed = discord.Embed(
+            title=f"{EMOJI_CLOCK} Slowmode Set",
+            description=f"Slowmode: {seconds}s",
+            color=C_GOLD
+        )
     await interaction.response.send_message(embed=embed)
 
 # ==================== UTILITY COMMANDS ====================
 @tree.command(name="ping", description="Check bot latency")
 async def ping_cmd(interaction: discord.Interaction):
     latency = round(bot.latency * 1000)
-    embed = discord.Embed(title=f"{EMOJI_PC} Pong!", description=f"Latency: `{latency}ms`", color=C_GREEN)
+    embed = discord.Embed(
+        title=f"{EMOJI_PC} Pong!",
+        description=f"Latency: `{latency}ms`",
+        color=C_SUCCESS
+    )
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="help", description="View all commands")
 async def help_cmd(interaction: discord.Interaction):
-    embed = discord.Embed(title=f"{EMOJI_GREEN_DOT} Help Center", description=f"Support: [Join Server]({SUPPORT_SERVER_URL})", color=C_BLUE)
+    embed = discord.Embed(
+        title=f"{EMOJI_GREEN_CROWN} Help Center",
+        description=f"Support: [Join Server]({SUPPORT_SERVER_URL})",
+        color=C_INFO
+    )
     embed.add_field(name="🎫 Tickets", value="`/setup-ticket` `/ticket` `/close` `/add` `/remove` `/transcript`", inline=False)
     embed.add_field(name="🎉 Giveaways", value="`/giveaway start` `/giveaway end` `/giveaway reroll` `/giveaway list`", inline=False)
     embed.add_field(name="🛡️ Moderation", value="`/ban` `/kick` `/timeout` `/warn` `/clear` `/lock` `/unlock` `/slowmode`", inline=False)
     embed.add_field(name="📊 Utility", value="`/ping` `/help` `/serverinfo` `/userinfo` `/avatar` `/botinfo`", inline=False)
     embed.add_field(name="🎭 Fun", value="`/8ball` `/coinflip` `/dice` `/meme`", inline=False)
     embed.add_field(name="💰 Economy", value="`/balance` `/daily` `/work` `/pay`", inline=False)
-    embed.add_field(name="🤖 IA", value="`/setupia`", inline=False)
+    embed.add_field(name="🤖 AI", value="`/setupia`", inline=False)
     embed.set_footer(text=_footer())
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="serverinfo", description="Server information")
 async def serverinfo_cmd(interaction: discord.Interaction):
     g = interaction.guild
-    embed = discord.Embed(title=f"{EMOJI_HOME} {g.name}", color=C_INFO)
+    embed = discord.Embed(
+        title=f"{EMOJI_HOUSE} {g.name}",
+        color=C_INFO
+    )
     embed.add_field(name="👑 Owner", value=g.owner.mention)
     embed.add_field(name="👥 Members", value=str(g.member_count))
     embed.add_field(name="📁 Channels", value=str(len(g.channels)))
@@ -861,7 +956,10 @@ async def serverinfo_cmd(interaction: discord.Interaction):
 @app_commands.describe(member="User (optional)")
 async def userinfo_cmd(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
-    embed = discord.Embed(title=f"{EMOJI_MEMBER} {target.display_name}", color=C_INFO)
+    embed = discord.Embed(
+        title=f"{EMOJI_MEMBER} {target.display_name}",
+        color=C_INFO
+    )
     embed.set_thumbnail(url=target.display_avatar.url)
     embed.add_field(name="ID", value=f"`{target.id}`", inline=True)
     embed.add_field(name="Bot", value="Yes" if target.bot else "No", inline=True)
@@ -873,16 +971,22 @@ async def userinfo_cmd(interaction: discord.Interaction, member: discord.Member 
 @app_commands.describe(member="User (optional)")
 async def avatar_cmd(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
-    embed = discord.Embed(title=f"{EMOJI_PC} Avatar of {target.display_name}", color=C_PURPLE)
+    embed = discord.Embed(
+        title=f"{EMOJI_PC} Avatar of {target.display_name}",
+        color=C_PURPLE
+    )
     embed.set_image(url=target.display_avatar.url)
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="botinfo", description="Bot information")
 async def botinfo_cmd(interaction: discord.Interaction):
-    embed = discord.Embed(title=f"{EMOJI_CROWN} Bot Information", color=C_GREEN)
+    embed = discord.Embed(
+        title=f"{EMOJI_GREEN_CROWN} Bot Information",
+        color=C_SUCCESS
+    )
     embed.add_field(name="Servers", value=str(len(bot.guilds)), inline=True)
     embed.add_field(name="Commands", value=str(len(bot.tree.get_commands())), inline=True)
-    embed.add_field(name="Uptime", value=_uptime(), inline=True)
+    embed.add_field(name="Uptime", value=format_uptime(bot.BOT_START_TIME), inline=True)
     embed.add_field(name="Latency", value=f"{round(bot.latency*1000)}ms", inline=True)
     if bot.user: embed.set_thumbnail(url=bot.user.display_avatar.url)
     embed.set_footer(text=_footer())
@@ -893,7 +997,10 @@ async def botinfo_cmd(interaction: discord.Interaction):
 @app_commands.describe(question="Your question")
 async def ball8_cmd(interaction: discord.Interaction, question: str):
     answers = ["Yes", "No", "Maybe", "Definitely", "Don't count on it"]
-    embed = discord.Embed(title=f"{EMOJI_8BALL} 8-Ball", color=0x2B2D31)
+    embed = discord.Embed(
+        title=f"{EMOJI_8BALL} 8-Ball",
+        color=0x2B2D31
+    )
     embed.add_field(name="Question", value=question, inline=False)
     embed.add_field(name="Answer", value=random.choice(answers), inline=False)
     await interaction.response.send_message(embed=embed)
@@ -901,14 +1008,22 @@ async def ball8_cmd(interaction: discord.Interaction, question: str):
 @tree.command(name="coinflip", description="Flip a coin")
 async def coinflip_cmd(interaction: discord.Interaction):
     result = random.choice(["🦅 Heads", "🪙 Tails"])
-    embed = discord.Embed(title=f"{EMOJI_COIN} Coin Flip", description=f"Result: **{result}**", color=C_GOLD)
+    embed = discord.Embed(
+        title=f"{EMOJI_COIN} Coin Flip",
+        description=f"Result: **{result}**",
+        color=C_GOLD
+    )
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="dice", description="Roll a die")
 @app_commands.describe(sides="Number of sides (4-100)")
 async def dice_cmd(interaction: discord.Interaction, sides: app_commands.Range[int, 4, 100] = 6):
     result = random.randint(1, sides)
-    embed = discord.Embed(title=f"{EMOJI_DICE} Dice Roll", description=f"Rolled **{result}** (1-{sides})", color=C_GREEN)
+    embed = discord.Embed(
+        title=f"{EMOJI_DICE} Dice Roll",
+        description=f"Rolled **{result}** (1-{sides})",
+        color=C_SUCCESS
+    )
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="meme", description="Random meme from Reddit")
@@ -924,7 +1039,10 @@ async def meme_cmd(interaction: discord.Interaction):
                 img = post.get("url", "")
                 if not img.lower().endswith((".jpg", ".png", ".gif", ".jpeg")):
                     return await interaction.followup.send("No image found.", ephemeral=True)
-                embed = discord.Embed(title=post.get("title", "Meme"), color=C_FUN)
+                embed = discord.Embed(
+                    title=post.get("title", "Meme"),
+                    color=C_FUN
+                )
                 embed.set_image(url=img)
                 await interaction.followup.send(embed=embed)
     except:
@@ -936,10 +1054,12 @@ async def meme_cmd(interaction: discord.Interaction):
 async def balance_cmd(interaction: discord.Interaction, member: discord.Member = None):
     target = member or interaction.user
     uid = str(target.id)
-    economy = load_json(ECONOMY_FILE, {})
     economy.setdefault(uid, {"cash": 0, "bank": 0})
     data = economy[uid]
-    embed = discord.Embed(title=f"{EMOJI_MONEY} Wallet", color=C_GREEN)
+    embed = discord.Embed(
+        title=f"{EMOJI_MONEY} Wallet",
+        color=C_SUCCESS
+    )
     embed.add_field(name="User", value=target.mention, inline=True)
     embed.add_field(name="Cash", value=f"${data['cash']:,}", inline=True)
     embed.add_field(name="Bank", value=f"${data['bank']:,}", inline=True)
@@ -949,7 +1069,6 @@ async def balance_cmd(interaction: discord.Interaction, member: discord.Member =
 @tree.command(name="daily", description="Claim your daily reward")
 async def daily_cmd(interaction: discord.Interaction):
     uid = str(interaction.user.id)
-    economy = load_json(ECONOMY_FILE, {})
     economy.setdefault(uid, {"cash": 0, "bank": 0, "daily": 0})
     now = time.time()
     if now - economy[uid].get("daily", 0) < 86400:
@@ -958,14 +1077,17 @@ async def daily_cmd(interaction: discord.Interaction):
     reward = random.randint(100, 500)
     economy[uid]["cash"] += reward
     economy[uid]["daily"] = now
-    save_json(ECONOMY_FILE, economy)
-    embed = discord.Embed(title=f"{EMOJI_GIFT} Daily Reward", description=f"You received **${reward}**!", color=C_GOLD)
+    save_economy()
+    embed = discord.Embed(
+        title=f"{EMOJI_GIFT} Daily Reward",
+        description=f"You received **${reward}**!",
+        color=C_GOLD
+    )
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="work", description="Work to earn cash")
 async def work_cmd(interaction: discord.Interaction):
     uid = str(interaction.user.id)
-    economy = load_json(ECONOMY_FILE, {})
     economy.setdefault(uid, {"cash": 0, "bank": 0, "work": 0})
     now = time.time()
     if now - economy[uid].get("work", 0) < 3600:
@@ -974,8 +1096,12 @@ async def work_cmd(interaction: discord.Interaction):
     earnings = random.randint(50, 200)
     economy[uid]["cash"] += earnings
     economy[uid]["work"] = now
-    save_json(ECONOMY_FILE, economy)
-    embed = discord.Embed(title=f"{EMOJI_BITCASH} Work Complete", description=f"You earned **${earnings}**!", color=C_GREEN)
+    save_economy()
+    embed = discord.Embed(
+        title=f"{EMOJI_BITCASH} Work Complete",
+        description=f"You earned **${earnings}**!",
+        color=C_SUCCESS
+    )
     await interaction.response.send_message(embed=embed)
 
 @tree.command(name="pay", description="Pay another user")
@@ -984,45 +1110,67 @@ async def pay_cmd(interaction: discord.Interaction, member: discord.Member, amou
     if amount <= 0:
         return await interaction.response.send_message("Amount must be positive.", ephemeral=True)
     uid = str(interaction.user.id)
-    economy = load_json(ECONOMY_FILE, {})
     economy.setdefault(uid, {"cash": 0, "bank": 0})
     if economy[uid]["cash"] < amount:
         return await interaction.response.send_message("Not enough cash.", ephemeral=True)
     economy[uid]["cash"] -= amount
     economy.setdefault(str(member.id), {"cash": 0, "bank": 0})["cash"] += amount
-    save_json(ECONOMY_FILE, economy)
-    embed = discord.Embed(title=f"{EMOJI_MONEY} Payment Sent", description=f"Paid {member.mention} **${amount}**.", color=C_GREEN)
+    save_economy()
+    embed = discord.Embed(
+        title=f"{EMOJI_MONEY} Payment Sent",
+        description=f"Paid {member.mention} **${amount}**.",
+        color=C_SUCCESS
+    )
     await interaction.response.send_message(embed=embed)
 
-# ==================== IA COMMANDS ====================
-@tree.command(name="setupia", description="[Admin] Toggle IA auto-reply in this channel")
-@app_commands.checks.has_permissions(administrator=True)
-async def setupia_cmd(interaction: discord.Interaction):
-    cid = str(interaction.channel_id)
-    ia_config = load_json(IA_CONFIG_FILE, {})
-    channels = ia_config.get("channels", [])
-    if cid in channels:
-        channels.remove(cid)
-        ia_config["channels"] = channels
-        save_json(IA_CONFIG_FILE, ia_config)
-        embed = discord.Embed(title="🤖 IA Disabled", color=C_ERROR)
-    else:
-        channels.append(cid)
-        ia_config["channels"] = channels
-        save_json(IA_CONFIG_FILE, ia_config)
-        embed = discord.Embed(title=f"{EMOJI_GREEN_DOT} IA Enabled", color=C_GREEN)
-    embed.description = f"{interaction.channel.mention} will auto-reply with OpenRouter."
+# ==================== LEVELS COMMANDS ====================
+@tree.command(name="rank", description="Check your rank")
+@app_commands.describe(member="User (optional)")
+async def rank_cmd(interaction: discord.Interaction, member: discord.Member = None):
+    target = member or interaction.user
+    guild_id = str(interaction.guild_id)
+    user_id = str(target.id)
+    if guild_id not in levels or user_id not in levels[guild_id]:
+        return await interaction.response.send_message(f"{EMOJI_AVISO} This user has no XP yet.", ephemeral=True)
+    data = levels[guild_id][user_id]
+    needed = xp_needed(data["level"])
+    embed = discord.Embed(
+        title=f"{EMOJI_ROCKET} Rank of {target.display_name}",
+        color=C_GREEN
+    )
+    embed.add_field(name="Level", value=str(data["level"]), inline=True)
+    embed.add_field(name="XP", value=f"{data['xp']}/{needed}", inline=True)
     embed.set_footer(text=_footer())
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed)
+
+@tree.command(name="leaderboard", description="View XP leaderboard")
+async def leaderboard_cmd(interaction: discord.Interaction):
+    guild_id = str(interaction.guild_id)
+    if guild_id not in levels or not levels[guild_id]:
+        return await interaction.response.send_message(f"{EMOJI_AVISO} No XP data for this server.", ephemeral=True)
+    sorted_users = sorted(levels[guild_id].items(), key=lambda x: (x[1]["level"], x[1]["xp"]), reverse=True)[:10]
+    embed = discord.Embed(
+        title=f"{EMOJI_CROWN} Leaderboard",
+        color=C_GOLD
+    )
+    desc = ""
+    for i, (user_id, data) in enumerate(sorted_users, 1):
+        member = interaction.guild.get_member(int(user_id))
+        name = member.display_name if member else f"Unknown ({user_id})"
+        desc += f"**{i}.** {name} — Level {data['level']} (XP: {data['xp']})\n"
+    embed.description = desc
+    embed.set_footer(text=_footer())
+    await interaction.response.send_message(embed=embed)
 
 # ==================== START BOT ====================
 async def main():
-    if not DISCORD_TOKEN:
-        logger.error("DISCORD_TOKEN not set!")
+    if not TOKEN:
+        logger.error("DISCORD_TOKEN not set.")
         return
-    start_web()
-    logger.info("Starting FMD BOT...")
-    await bot.start(DISCORD_TOKEN)
+    health_thread = threading.Thread(target=_start_health_server, daemon=True)
+    health_thread.start()
+    logger.info(f"Starting {BOT_NAME}...")
+    await bot.start(TOKEN)
 
 if __name__ == "__main__":
     asyncio.run(main())
