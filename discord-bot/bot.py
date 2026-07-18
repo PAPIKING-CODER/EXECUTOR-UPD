@@ -4,6 +4,7 @@ import json
 import time
 import asyncio
 import logging
+from logging.handlers import RotatingFileHandler
 import threading
 from datetime import datetime, timezone
 from http.server import HTTPServer, BaseHTTPRequestHandler
@@ -21,7 +22,7 @@ load_dotenv()
 LOG_FILE = "bot_logs.txt"
 logger = logging.getLogger("KING_BOT")
 logger.setLevel(logging.INFO)
-_file_handler = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
+_file_handler = RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
 _fmt = logging.Formatter("[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
 _file_handler.setFormatter(_fmt)
 _console_handler = logging.StreamHandler()
